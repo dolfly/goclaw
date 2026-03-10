@@ -522,6 +522,51 @@ func (m *Manager) SetupFromConfig(cfg *config.Config) error {
 		}
 	}
 
+	// 企业微信websocket长连接机器人通道
+	if cfg.Channels.WeWorkWsBot.Enabled {
+		if len(cfg.Channels.WeWorkWsBot.Accounts) > 0 {
+			// 多账号配置
+			for accountID, accountCfg := range cfg.Channels.WeWorkWsBot.Accounts {
+				if accountCfg.Enabled && accountCfg.AgentID != "" {
+					wwCfg := config.WeWorkWsBotChannelConfig{
+						Enabled:        accountCfg.Enabled,
+						BotID:          accountCfg.AgentID,
+						SecretID:       accountCfg.AppSecret,
+						URL:            cfg.Channels.WeWorkWsBot.URL,
+						Header:         cfg.Channels.WeWorkWsBot.Header,
+						Reconnect:      cfg.Channels.WeWorkWsBot.Reconnect,
+						ReconnectDelay: cfg.Channels.WeWorkWsBot.ReconnectDelay,
+						Heartbeat:      cfg.Channels.WeWorkWsBot.Heartbeat,
+						AllowedIDs:     accountCfg.AllowedIDs,
+					}
+					channel, err := NewWeWorkWsBotChannel(wwCfg, m.bus)
+					if err != nil {
+						logger.Error("Failed to create WeWork channel",
+							zap.String("account_id", accountID),
+							zap.Error(err))
+					} else {
+						channelName := buildChannelName("wework_wsbot", accountID)
+						if err := m.RegisterWithName(channel, channelName); err != nil {
+							logger.Error("Failed to register WeWorkWSBot channel",
+								zap.String("account_id", accountID),
+								zap.Error(err))
+						}
+					}
+				}
+			}
+		} else if cfg.Channels.WeWorkWsBot.BotID != "" {
+			// 单账号配置（向后兼容）
+			channel, err := NewWeWorkWsBotChannel(cfg.Channels.WeWorkWsBot, m.bus)
+			if err != nil {
+				logger.Error("Failed to create WeWorkWSBot channel", zap.Error(err))
+			} else {
+				if err := m.Register(channel); err != nil {
+					logger.Error("Failed to register WeWorkWSBot channel", zap.Error(err))
+				}
+			}
+		}
+	}
+
 	// 钉钉通道
 	if cfg.Channels.DingTalk.Enabled {
 		if len(cfg.Channels.DingTalk.Accounts) > 0 {

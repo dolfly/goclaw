@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/http"
 	"time"
 )
 
@@ -95,14 +96,15 @@ type BindingMatch struct {
 
 // ChannelsConfig 通道配置
 type ChannelsConfig struct {
-	Telegram TelegramChannelConfig `mapstructure:"telegram" json:"telegram"`
-	WhatsApp WhatsAppChannelConfig `mapstructure:"whatsapp" json:"whatsapp"`
-	Feishu   FeishuChannelConfig   `mapstructure:"feishu" json:"feishu"`
-	DingTalk DingTalkChannelConfig `mapstructure:"dingtalk" json:"dingtalk"`
-	QQ       QQChannelConfig       `mapstructure:"qq" json:"qq"`
-	WeWork   WeWorkChannelConfig   `mapstructure:"wework" json:"wework"`
-	Infoflow InfoflowChannelConfig `mapstructure:"infoflow" json:"infoflow"`
-	Gotify   GotifyChannelConfig   `mapstructure:"gotify" json:"gotify"`
+	Telegram    TelegramChannelConfig    `mapstructure:"telegram" json:"telegram"`
+	WhatsApp    WhatsAppChannelConfig    `mapstructure:"whatsapp" json:"whatsapp"`
+	Feishu      FeishuChannelConfig      `mapstructure:"feishu" json:"feishu"`
+	DingTalk    DingTalkChannelConfig    `mapstructure:"dingtalk" json:"dingtalk"`
+	QQ          QQChannelConfig          `mapstructure:"qq" json:"qq"`
+	WeWork      WeWorkChannelConfig      `mapstructure:"wework" json:"wework"`
+	WeWorkWsBot WeWorkWsBotChannelConfig `mapstructure:"weworkwsbot" json:"weworkwsbot"`
+	Infoflow    InfoflowChannelConfig    `mapstructure:"infoflow" json:"infoflow"`
+	Gotify      GotifyChannelConfig      `mapstructure:"gotify" json:"gotify"`
 }
 
 // ChannelAccountConfig 通道账号配置（支持多账号）
@@ -165,7 +167,7 @@ type FeishuChannelConfig struct {
 	DMPolicy          string   `mapstructure:"dm_policy" json:"dm_policy"`       // 私聊策略: open, pairing, allowlist, closed (默认: pairing)
 	AllowedIDs        []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// CronOutputChatID 指定 cron 任务输出的目标聊天 ID（用于接收定时任务的通知）
-	CronOutputChatID  string   `mapstructure:"cron_output_chat_id" json:"cron_output_chat_id"`
+	CronOutputChatID string `mapstructure:"cron_output_chat_id" json:"cron_output_chat_id"`
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
 }
@@ -190,6 +192,21 @@ type WeWorkChannelConfig struct {
 	EncodingAESKey string   `mapstructure:"encoding_aes_key" json:"encoding_aes_key"`
 	WebhookPort    int      `mapstructure:"webhook_port" json:"webhook_port"`
 	AllowedIDs     []string `mapstructure:"allowed_ids" json:"allowed_ids"`
+	// 多账号配置（新格式）
+	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
+}
+
+// WeWorkWsBotChannelConfig 企业微信 WebSocket 长连接机器人配置
+type WeWorkWsBotChannelConfig struct {
+	Enabled        bool        `mapstructure:"enabled" json:"enabled"`
+	BotID          string      `mapstructure:"bot_id" json:"bot_id"`
+	SecretID       string      `mapstructure:"secret_id" json:"secret_id"`
+	URL            string      `mapstructure:"url" json:"url"`                         // WebSocket URL (固定值：wss://openws.work.weixin.qq.com)
+	Header         http.Header `mapstructure:"header" json:"header"`                   // 连接头
+	Reconnect      bool        `mapstructure:"reconnect" json:"reconnect"`             // 是否自动重连
+	ReconnectDelay int         `mapstructure:"reconnect_delay" json:"reconnect_delay"` // 重连延迟，默认 3 秒
+	Heartbeat      int         `mapstructure:"heartbeat" json:"heartbeat"`             // 心跳间隔，默认 30 秒
+	AllowedIDs     []string    `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
 }
@@ -221,7 +238,7 @@ type GotifyChannelConfig struct {
 	Enabled    bool     `mapstructure:"enabled" json:"enabled"`
 	ServerURL  string   `mapstructure:"server_url" json:"server_url"`
 	AppToken   string   `mapstructure:"app_token" json:"app_token"`
-	Priority   int      `mapstructure:"priority" json:"priority"`   // 消息优先级 1-10
+	Priority   int      `mapstructure:"priority" json:"priority"` // 消息优先级 1-10
 	AllowedIDs []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
