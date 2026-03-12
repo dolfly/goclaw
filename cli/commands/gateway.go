@@ -1,44 +1,27 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"text/template"
 	"time"
 
-	"github.com/smallnest/goclaw/acp"
-	"github.com/smallnest/goclaw/bus"
-	"github.com/smallnest/goclaw/channels"
 	"github.com/smallnest/goclaw/config"
-	"github.com/smallnest/goclaw/gateway"
-	"github.com/smallnest/goclaw/internal/logger"
-	"github.com/smallnest/goclaw/session"
+	"github.com/smallnest/goclaw/internal/start"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 var (
-	gatewayPort      int
-	gatewayBind      string
-	gatewayToken     string
-	gatewayAuth      bool
-	gatewayPassword  string
-	gatewayTailscale bool
-	gatewayDev       bool
-	gatewayReset     bool
-	gatewayForce     bool
-	gatewayVerbose   bool
-	gatewayParams    string
+	gatewayPort    int
+	gatewayVerbose bool
+	gatewayParams  string
 )
 
 // GatewayCommand returns the gateway command
@@ -48,22 +31,12 @@ func GatewayCommand() *cobra.Command {
 		Short: "Manage WebSocket Gateway",
 		Long:  `Run and manage the goclaw WebSocket gateway server.`,
 	}
-
-	// Main gateway run command
 	runCmd := &cobra.Command{
 		Use:   "run",
-		Short: "Run WebSocket Gateway",
+		Short: "Run goclaw Agent with Gateway (same as goclaw start)",
 		Run:   runGateway,
 	}
-	runCmd.Flags().IntVarP(&gatewayPort, "port", "p", 28789, "Gateway port")
-	runCmd.Flags().StringVarP(&gatewayBind, "bind", "b", "0.0.0.0", "Bind address")
-	runCmd.Flags().StringVarP(&gatewayToken, "token", "t", "", "Authentication token")
-	runCmd.Flags().BoolVar(&gatewayAuth, "auth", false, "Enable authentication")
-	runCmd.Flags().StringVarP(&gatewayPassword, "password", "P", "", "Password for authentication")
-	runCmd.Flags().BoolVar(&gatewayTailscale, "tailscale", false, "Use Tailscale")
-	runCmd.Flags().BoolVar(&gatewayDev, "dev", false, "Development mode")
-	runCmd.Flags().BoolVar(&gatewayReset, "reset", false, "Reset configuration")
-	runCmd.Flags().BoolVarP(&gatewayForce, "force", "f", false, "Force start")
+	// Note: Only --verbose is supported now. For other settings, please use the config file.
 	runCmd.Flags().BoolVarP(&gatewayVerbose, "verbose", "v", false, "Verbose output")
 
 	// Gateway status command
@@ -90,12 +63,10 @@ func GatewayCommand() *cobra.Command {
 	// Gateway install command
 	installCmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install gateway as service",
+		Short: "Install goclaw Agent as service (configure port in config file)",
 		Run:   runGatewayInstall,
 	}
-	installCmd.Flags().IntVarP(&gatewayPort, "port", "p", 28789, "Gateway port")
 
-	// Gateway uninstall command
 	uninstallCmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Uninstall gateway service",
@@ -139,165 +110,19 @@ func GatewayCommand() *cobra.Command {
 	return cmd
 }
 
-// runGateway runs the gateway server
+// runGateway runs the gateway server with full agent support
 func runGateway(cmd *cobra.Command, args []string) {
-	// Initialize logger
+	// Set log level from flags
 	logLevel := "info"
 	if gatewayVerbose {
 		logLevel = "debug"
 	}
-	if err := logger.Init(logLevel, false); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+
+	// Start the full agent with all components
+	// This provides the same functionality as `goclaw start`
+	if err := start.StartAgent(&start.Config{LogLevel: logLevel}); err != nil {
 		os.Exit(1)
 	}
-	defer logger.Sync() // nolint:errcheck
-
-	fmt.Println("🚀 Starting goclaw Gateway")
-
-	// Load configuration
-	cfg, err := config.Load("")
-	if err != nil {
-		logger.Warn("Failed to load config, using defaults", zap.Error(err))
-		cfg = &config.Config{}
-	}
-
-	// Override config with flags
-	if gatewayPort != 0 {
-		cfg.Gateway.Port = gatewayPort
-	}
-	if gatewayBind != "" {
-		cfg.Gateway.Host = gatewayBind
-	}
-
-	// Create components
-	messageBus := bus.NewMessageBus(100)
-	defer messageBus.Close()
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		logger.Fatal("Failed to get home directory", zap.Error(err))
-	}
-	sessionDir := homeDir + "/.goclaw/sessions"
-	sessionMgr, err := session.NewManager(sessionDir)
-	if err != nil {
-		logger.Fatal("Failed to create session manager", zap.Error(err))
-	}
-
-	channelMgr := channels.NewManager(messageBus)
-	if err := channelMgr.SetupFromConfig(cfg); err != nil {
-		logger.Warn("Failed to setup channels from config", zap.Error(err))
-	}
-
-	// Create ACP manager if enabled
-	var acpMgr interface{}
-	if cfg.ACP.Enabled {
-		// Use the global ACP manager singleton
-		acpMgr = acp.GetOrCreateGlobalManager(cfg)
-		logger.Info("ACP manager created")
-	}
-
-	// Create gateway server
-	// NewServer reads from cfg.Gateway.WebSocket, so we only override if CLI flags are explicitly provided
-	gatewayServer := gateway.NewServer(cfg, messageBus, channelMgr, sessionMgr, nil, acpMgr)
-
-	// Only override WebSocket config if CLI flags are explicitly provided
-	// If no CLI flags are set, use config file settings (already loaded by NewServer)
-	if gatewayPort != 0 || gatewayBind != "" || gatewayAuth || gatewayToken != "" || gatewayPassword != "" {
-		wsConfig := &gateway.WebSocketConfig{
-			Host:           gatewayBind,
-			Port:           gatewayPort,
-			Path:           "/ws",
-			EnableAuth:     gatewayAuth || gatewayToken != "" || gatewayPassword != "",
-			AuthToken:      gatewayToken,
-			PingInterval:   30 * time.Second,
-			PongTimeout:    60 * time.Second,
-			ReadTimeout:    60 * time.Second,
-			WriteTimeout:   10 * time.Second,
-			MaxMessageSize: 10 * 1024 * 1024,
-		}
-
-		if gatewayPassword != "" {
-			wsConfig.AuthToken = gatewayPassword
-		}
-
-		gatewayServer.SetWebSocketConfig(wsConfig)
-	}
-
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		fmt.Println("\nShutting down gateway...")
-		cancel()
-	}()
-
-	// Start gateway
-	if err := gatewayServer.Start(ctx); err != nil {
-		logger.Fatal("Failed to start gateway", zap.Error(err))
-	}
-
-	// Start channels
-	if err := channelMgr.Start(ctx); err != nil {
-		logger.Error("Failed to start channels", zap.Error(err))
-	}
-	defer func() { _ = channelMgr.Stop() }()
-
-	// Start outbound message dispatcher
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("Outbound message dispatcher panicked",
-					zap.Any("panic", r))
-			}
-		}()
-		if err := channelMgr.DispatchOutbound(ctx); err != nil {
-			logger.Error("Outbound message dispatcher exited with error", zap.Error(err))
-		} else {
-			logger.Info("Outbound message dispatcher exited normally")
-		}
-	}()
-
-	// Determine actual host and port to display
-	displayHost := gatewayBind
-	displayPort := gatewayPort
-	if displayHost == "" {
-		displayHost = cfg.Gateway.WebSocket.Host
-		if displayHost == "" {
-			displayHost = "0.0.0.0"
-		}
-	}
-	if displayPort == 0 {
-		displayPort = cfg.Gateway.WebSocket.Port
-		if displayPort == 0 {
-			displayPort = 28789
-		}
-	}
-
-	fmt.Printf("Gateway listening on %s:%d\n", displayHost, displayPort)
-	fmt.Printf("WebSocket: ws://%s:%d/ws\n", displayHost, displayPort)
-	fmt.Printf("Health: http://%s:%d/health\n", displayHost, displayPort)
-
-	if gatewayAuth || gatewayToken != "" || gatewayPassword != "" {
-		fmt.Println("Authentication: enabled")
-	}
-
-	fmt.Println("\nPress Ctrl+C to stop")
-
-	// Wait for context cancellation
-	<-ctx.Done()
-
-	// Stop gateway
-	if err := gatewayServer.Stop(); err != nil {
-		logger.Error("Failed to stop gateway", zap.Error(err))
-	}
-
-	fmt.Println("Gateway stopped")
-	defer logger.Sync() // nolint:errcheck
 }
 
 // runGatewayStatus shows gateway status
@@ -412,7 +237,7 @@ func runGatewayProbe(cmd *cobra.Command, args []string) {
 
 // runGatewayInstall installs gateway as service
 func runGatewayInstall(cmd *cobra.Command, args []string) {
-	fmt.Println("Installing goclaw Gateway service...")
+	fmt.Println("Installing goclaw Agent service...")
 
 	// Get the executable path
 	execPath, err := os.Executable()
@@ -446,7 +271,7 @@ func runGatewayInstall(cmd *cobra.Command, args []string) {
 
 // runGatewayUninstall uninstalls gateway service
 func runGatewayUninstall(cmd *cobra.Command, args []string) {
-	fmt.Println("Uninstalling goclaw Gateway service...")
+	fmt.Println("Uninstalling goclaw Agent service...")
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -463,7 +288,7 @@ func runGatewayUninstall(cmd *cobra.Command, args []string) {
 
 // runGatewayStart starts gateway service
 func runGatewayStart(cmd *cobra.Command, args []string) {
-	fmt.Println("Starting goclaw Gateway service...")
+	fmt.Println("Starting goclaw Agent service...")
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -480,7 +305,7 @@ func runGatewayStart(cmd *cobra.Command, args []string) {
 
 // runGatewayStop stops gateway service
 func runGatewayStop(cmd *cobra.Command, args []string) {
-	fmt.Println("Stopping goclaw Gateway service...")
+	fmt.Println("Stopping goclaw Agent service...")
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -497,7 +322,7 @@ func runGatewayStop(cmd *cobra.Command, args []string) {
 
 // runGatewayRestart restarts gateway service
 func runGatewayRestart(cmd *cobra.Command, args []string) {
-	fmt.Println("Restarting goclaw Gateway service...")
+	fmt.Println("Restarting goclaw Agent service...")
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -563,8 +388,6 @@ func installMacOSService(execPath string) {
         <string>{{.ExecPath}}</string>
         <string>gateway</string>
         <string>run</string>
-        <string>--port</string>
-        <string>{{.Port}}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -620,7 +443,6 @@ func installMacOSService(execPath string) {
 		ExecPath: execPath,
 		WorkDir:  workDir,
 		HomeDir:  homeDir,
-		Port:     gatewayPort,
 	}
 
 	if err := tmpl.Execute(plistFile, data); err != nil {
@@ -639,7 +461,6 @@ func installMacOSService(execPath string) {
 	fmt.Printf("Gateway service installed successfully\n")
 	fmt.Printf("  Config: %s\n", plistPath)
 	fmt.Printf("  Executable: %s\n", execPath)
-	fmt.Printf("  Port: %d\n", gatewayPort)
 	fmt.Printf("  Logs: %s/gateway.stdout.log\n", logDir)
 	fmt.Printf("  Logs: %s/gateway.stderr.log\n", logDir)
 	fmt.Println("\nUse 'goclaw gateway start' to start the service")
@@ -778,12 +599,12 @@ func installLinuxService(execPath string) {
 
 	// Create systemd service content
 	serviceContent := `[Unit]
-Description=goclaw Gateway Service
+Description=goclaw Agent Service
 After=network.target
 
 [Service]
 Type=simple
-ExecStart={{.ExecPath}} gateway run --port {{.Port}}
+ExecStart={{.ExecPath}} gateway run
 WorkingDirectory={{.WorkDir}}
 Restart=always
 RestartSec=10
@@ -825,7 +646,6 @@ WantedBy=default.target
 		ExecPath: execPath,
 		WorkDir:  workDir,
 		HomeDir:  homeDir,
-		Port:     gatewayPort,
 	}
 
 	if err := tmpl.Execute(serviceFile, data); err != nil {
@@ -850,7 +670,6 @@ WantedBy=default.target
 	fmt.Printf("Gateway service installed successfully\n")
 	fmt.Printf("  Config: %s\n", servicePath)
 	fmt.Printf("  Executable: %s\n", execPath)
-	fmt.Printf("  Port: %d\n", gatewayPort)
 	fmt.Printf("  Logs: %s/gateway.stdout.log\n", logDir)
 	fmt.Printf("  Logs: %s/gateway.stderr.log\n", logDir)
 	fmt.Println("\nUse 'goclaw gateway start' to start the service")
@@ -985,7 +804,7 @@ func installWindowsService(execPath string) {
 	// Create the service
 	fmt.Printf("Creating service: %s\n", windowsServiceName)
 	createCmd := exec.Command("sc.exe", "create", windowsServiceName,
-		"binPath=", "\""+execPath+"\" gateway run --port "+fmt.Sprint(gatewayPort),
+		"binPath=", "`" + execPath + "` gateway run",
 		"DisplayName= GoClaw Gateway",
 		"start= auto")
 
@@ -1008,7 +827,6 @@ func installWindowsService(execPath string) {
 	fmt.Printf("Gateway service installed successfully\n")
 	fmt.Printf("  Service Name: %s\n", windowsServiceName)
 	fmt.Printf("  Executable: %s\n", execPath)
-	fmt.Printf("  Port: %d\n", gatewayPort)
 	fmt.Println("\nUse 'goclaw gateway start' to start the service")
 	fmt.Println("Or use: sc start", windowsServiceName)
 }
