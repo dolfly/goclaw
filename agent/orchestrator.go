@@ -95,6 +95,9 @@ func (o *Orchestrator) runLoop(ctx context.Context, state *AgentState) ([]AgentM
 		maxIterations = 15 // default
 	}
 
+	// Initialize retry manager
+	retryManager := NewRetryManager(o.config.Retry, o.config.ErrorClassifier)
+
 	// Check for steering messages at start
 	pendingMessages := o.fetchSteeringMessages()
 
@@ -151,8 +154,8 @@ func (o *Orchestrator) runLoop(ctx context.Context, state *AgentState) ([]AgentM
 				pendingMessages = []AgentMessage{}
 			}
 
-			// Stream assistant response
-			assistantMsg, err := o.streamAssistantResponse(ctx, state)
+			// Stream assistant response with retry mechanism
+			assistantMsg, err := o.streamAssistantResponseWithRetry(ctx, state, retryManager)
 			if err != nil {
 				o.emitErrorEnd(state, err)
 				return state.Messages, err
@@ -200,6 +203,134 @@ func (o *Orchestrator) runLoop(ctx context.Context, state *AgentState) ([]AgentM
 	}
 
 	return state.Messages, nil
+}
+
+// streamAssistantResponseWithRetry calls the LLM with retry mechanism
+func (o *Orchestrator) streamAssistantResponseWithRetry(ctx context.Context, state *AgentState, retryManager RetryManager) (AgentMessage, error) {
+	for {
+		assistantMsg, err := o.streamAssistantResponse(ctx, state)
+		if err == nil {
+			retryManager.RecordSuccess()
+			return assistantMsg, nil
+		}
+
+		// Get retry decision
+		decision := retryManager.RecordError(err)
+		if !decision.ShouldRetry {
+			return AgentMessage{}, err
+		}
+
+		// Execute recovery action
+		switch decision.Action {
+		case RecoveryActionRotateProfile:
+			o.emitRetryEvent(state, "rotate_profile", decision, retryManager.GetState().Attempt)
+			// Profile rotation is handled by RotationProvider internally
+			// We just need to retry with the same provider
+
+		case RecoveryActionCompressContext:
+			o.emitRetryEvent(state, "compress_context", decision, retryManager.GetState().Attempt)
+			state.Messages = o.compressMessages(state.Messages)
+		}
+
+		// Wait for backoff delay
+		if decision.Delay > 0 {
+			logger.Info("Waiting before retry",
+				zap.Duration("delay", decision.Delay),
+				zap.String("action", string(decision.Action)))
+
+			select {
+			case <-time.After(decision.Delay):
+			case <-ctx.Done():
+				return AgentMessage{}, ctx.Err()
+			}
+		}
+	}
+}
+
+// emitRetryEvent emits a retry event for logging
+func (o *Orchestrator) emitRetryEvent(state *AgentState, action string, decision RetryDecision, attempt int) {
+	logger.Info("Retrying LLM call",
+		zap.String("action", action),
+		zap.Int("attempt", attempt),
+		zap.String("reason", decision.Reason))
+}
+
+// compressMessages compresses message history to reduce context size
+func (o *Orchestrator) compressMessages(messages []AgentMessage) []AgentMessage {
+	if len(messages) <= 4 {
+		return messages
+	}
+
+	// Keep the most recent 4 messages
+	keepRecent := 4
+	summary := o.createMessageSummary(messages[:len(messages)-keepRecent])
+
+	// Create compressed message history
+	compressed := []AgentMessage{
+		{
+			Role:      RoleSystem,
+			Content:   []ContentBlock{TextContent{Text: summary}},
+			Timestamp: time.Now().UnixMilli(),
+		},
+	}
+	compressed = append(compressed, messages[len(messages)-keepRecent:]...)
+
+	logger.Info("Compressed message history",
+		zap.Int("original_count", len(messages)),
+		zap.Int("compressed_count", len(compressed)))
+
+	return compressed
+}
+
+// createMessageSummary creates a summary of messages for context compression
+func (o *Orchestrator) createMessageSummary(messages []AgentMessage) string {
+	var summary strings.Builder
+	summary.WriteString("[CONTEXT SUMMARY]\n")
+	summary.WriteString("Previous conversation history has been compressed.\n")
+
+	// Count message types
+	userCount := 0
+	assistantCount := 0
+	toolCount := 0
+
+	for _, msg := range messages {
+		switch msg.Role {
+		case RoleUser:
+			userCount++
+		case RoleAssistant:
+			assistantCount++
+		case RoleToolResult:
+			toolCount++
+		}
+	}
+
+	summary.WriteString(fmt.Sprintf("Messages: %d user, %d assistant, %d tool results.\n", userCount, assistantCount, toolCount))
+
+	// Try to extract key information from the last few messages
+	if len(messages) > 0 {
+		lastUserMsg := ""
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == RoleUser {
+				for _, block := range messages[i].Content {
+					if text, ok := block.(TextContent); ok {
+						lastUserMsg = text.Text
+						break
+					}
+				}
+				if lastUserMsg != "" {
+					break
+				}
+			}
+		}
+
+		if lastUserMsg != "" {
+			preview := truncateString(lastUserMsg, 200)
+			summary.WriteString(fmt.Sprintf("Last user message: %s\n", preview))
+		}
+	}
+
+	summary.WriteString("[END SUMMARY]\n")
+	return summary.String()
 }
 
 // streamAssistantResponse calls the LLM and streams the response

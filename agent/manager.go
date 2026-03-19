@@ -374,6 +374,12 @@ func (m *AgentManager) createAgent(cfg config.AgentConfig, contextBuilder *Conte
 		maxHistoryMessages = 100
 	}
 
+	// 获取重试配置
+	var retryConfig *RetryConfig
+	if globalCfg.Agents.Defaults.Retry != nil {
+		retryConfig = convertRetryConfig(globalCfg.Agents.Defaults.Retry)
+	}
+
 	// 创建 Agent
 	agent, err := NewAgent(&NewAgentConfig{
 		Bus:                m.bus,
@@ -385,6 +391,7 @@ func (m *AgentManager) createAgent(cfg config.AgentConfig, contextBuilder *Conte
 		MaxIteration:       maxIterations,
 		MaxHistoryMessages: maxHistoryMessages,
 		SkillsLoader:       m.skillsLoader,
+		Retry:              retryConfig,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create agent %s: %w", cfg.ID, err)
@@ -1007,4 +1014,20 @@ func (m *AgentManager) GetToolsInfo() (map[string]interface{}, error) {
 	}
 
 	return result, nil
+}
+
+// convertRetryConfig converts config.RetryConfig to agent.RetryConfig
+func convertRetryConfig(cfg *config.RetryConfig) *RetryConfig {
+	if cfg == nil {
+		return nil
+	}
+	return &RetryConfig{
+		Enabled:               cfg.Enabled,
+		MaxRetries:            cfg.MaxRetries,
+		InitialDelay:          cfg.InitialDelay,
+		MaxDelay:              cfg.MaxDelay,
+		BackoffFactor:         cfg.BackoffFactor,
+		RetryableErrors:       cfg.RetryableErrors,
+		ContextOverflowAction: cfg.ContextOverflowAction,
+	}
 }

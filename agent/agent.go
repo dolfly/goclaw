@@ -44,6 +44,7 @@ type NewAgentConfig struct {
 	MaxIteration       int
 	MaxHistoryMessages int // 最大历史消息数量
 	SkillsLoader       *SkillsLoader
+	Retry              *RetryConfig // Retry configuration
 }
 
 // NewAgent creates a new agent
@@ -91,6 +92,7 @@ func NewAgent(cfg *NewAgentConfig) (*Agent, error) {
 		Skills:           skills,
 		LoadedSkills:     state.LoadedSkills,
 		ContextBuilder:   cfg.Context,
+		Retry:            cfg.Retry,
 		GetSteeringMessages: func(s *AgentState) func() ([]AgentMessage, error) {
 			return func() ([]AgentMessage, error) {
 				return s.DequeueSteeringMessages(), nil

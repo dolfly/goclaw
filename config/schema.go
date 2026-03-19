@@ -42,6 +42,7 @@ type AgentDefaults struct {
 	MaxTokens          int              `mapstructure:"max_tokens" json:"max_tokens"`
 	MaxHistoryMessages int              `mapstructure:"max_history_messages" json:"max_history_messages"` // 最大历史消息数量
 	Subagents          *SubagentsConfig `mapstructure:"subagents" json:"subagents"`
+	Retry              *RetryConfig     `mapstructure:"retry" json:"retry"` // 重试配置
 }
 
 // SubagentsConfig 分身配置
@@ -51,6 +52,30 @@ type SubagentsConfig struct {
 	Model               string `mapstructure:"model" json:"model"`
 	Thinking            string `mapstructure:"thinking" json:"thinking"`
 	TimeoutSeconds      int    `mapstructure:"timeout_seconds" json:"timeout_seconds"`
+}
+
+// RetryConfig 重试配置
+type RetryConfig struct {
+	Enabled               bool          `mapstructure:"enabled" json:"enabled"`
+	MaxRetries            int           `mapstructure:"max_retries" json:"max_retries"`
+	InitialDelay          time.Duration `mapstructure:"initial_delay" json:"initial_delay"`
+	MaxDelay              time.Duration `mapstructure:"max_delay" json:"max_delay"`
+	BackoffFactor         float64       `mapstructure:"backoff_factor" json:"backoff_factor"`
+	RetryableErrors       []string      `mapstructure:"retryable_errors" json:"retryable_errors"`
+	ContextOverflowAction string        `mapstructure:"context_overflow_action" json:"context_overflow_action"` // compress, truncate
+}
+
+// DefaultRetryConfig 返回默认重试配置
+func DefaultRetryConfig() *RetryConfig {
+	return &RetryConfig{
+		Enabled:               true,
+		MaxRetries:            3,
+		InitialDelay:          2 * time.Second,
+		MaxDelay:              60 * time.Second,
+		BackoffFactor:         2.0,
+		RetryableErrors:       []string{"auth", "rate_limit", "timeout", "context_overflow", "billing"},
+		ContextOverflowAction: "compress",
+	}
 }
 
 // AgentSubagentConfig 单 Agent 分身配置

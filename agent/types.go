@@ -4,9 +4,40 @@ import (
 	"context"
 	"time"
 
+	"github.com/smallnest/goclaw/errors"
 	"github.com/smallnest/goclaw/providers"
 	"github.com/smallnest/goclaw/session"
 )
+
+// RecoveryAction 恢复动作
+type RecoveryAction string
+
+const (
+	RecoveryActionNone            RecoveryAction = "none"
+	RecoveryActionRotateProfile   RecoveryAction = "rotate_profile"
+	RecoveryActionBackoff         RecoveryAction = "backoff"
+	RecoveryActionCompressContext RecoveryAction = "compress_context"
+)
+
+// RetryState 重试状态
+type RetryState struct {
+	Attempt         int
+	LastError       error
+	LastErrorReason errors.FailoverReason
+	NextRetryAt     time.Time
+	TotalDelay      time.Duration
+}
+
+// RetryConfig 重试配置（用于 agent 包内部）
+type RetryConfig struct {
+	Enabled               bool
+	MaxRetries            int
+	InitialDelay          time.Duration
+	MaxDelay              time.Duration
+	BackoffFactor         float64
+	RetryableErrors       []string
+	ContextOverflowAction string
+}
 
 // MessageRole represents the role of a message
 type MessageRole string
@@ -179,6 +210,7 @@ type LoopConfig struct {
 	MaxIterations int
 	SessionID     string
 	ToolTimeout   time.Duration // Timeout for individual tool executions (default: 3 minutes)
+	Retry         *RetryConfig  // Retry configuration
 
 	// Hooks for message transformation
 	ConvertToLLM     func([]AgentMessage) ([]providers.Message, error)
@@ -192,6 +224,9 @@ type LoopConfig struct {
 	Skills         []*Skill
 	LoadedSkills   []string
 	ContextBuilder *ContextBuilder
+
+	// Error handling
+	ErrorClassifier errors.ErrorClassifier
 }
 
 // NewAgentState creates a new agent state
