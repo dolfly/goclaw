@@ -4,7 +4,7 @@ import { ConnectionStatus, WSMessage } from '../types';
 
 interface UseWebSocketReturn {
   status: ConnectionStatus;
-  sendMessage: (method: string, params?: Record<string, unknown>) => void;
+  sendMessage: (method: string, params?: Record<string, unknown>, id?: string) => void;
   lastMessage: WSMessage | null;
 }
 
@@ -34,8 +34,8 @@ export const useWebSocket = (autoConnect = true): UseWebSocketReturn => {
     };
   }, []);
 
-  const sendMessage = useCallback((method: string, params?: Record<string, unknown>) => {
-    wsService.send(method, params);
+  const sendMessage = useCallback((method: string, params?: Record<string, unknown>, id?: string) => {
+    wsService.send(method, params, id);
   }, []);
 
   return {

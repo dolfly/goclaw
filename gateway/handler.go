@@ -125,6 +125,34 @@ func (h *Handler) registerSystemMethods() {
 
 // registerAgentMethods 注册 Agent 方法
 func (h *Handler) registerAgentMethods() {
+	// chat - 直接与 gateway 对话
+	h.registry.Register("chat", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		content, ok := params["content"].(string)
+		if !ok {
+			return nil, fmt.Errorf("content parameter is required")
+		}
+
+		// 构造入站消息
+		msg := &bus.InboundMessage{
+			Channel:   "gateway",
+			SenderID:  sessionID,
+			ChatID:    sessionID,
+			Content:   content,
+			Timestamp: time.Now(),
+		}
+
+		// 发布到消息总线
+		if err := h.bus.PublishInbound(context.Background(), msg); err != nil {
+			return nil, fmt.Errorf("failed to publish message: %w", err)
+		}
+
+		return map[string]interface{}{
+			"status":  "queued",
+			"msg_id":  msg.ID,
+			"session": sessionID,
+		}, nil
+	})
+
 	// agent - 发送消息给 Agent
 	h.registry.Register("agent", func(sessionID string, params map[string]interface{}) (interface{}, error) {
 		content, ok := params["content"].(string)

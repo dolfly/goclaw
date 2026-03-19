@@ -234,6 +234,13 @@ func (m *Manager) DispatchOutbound(ctx context.Context) error {
 				zap.String("chat_id", msg.ChatID),
 				zap.Int("content_length", len(msg.Content)))
 
+			// 跳过 gateway channel 的消息，这些消息由 WebSocket 直接处理
+			if msg.Channel == "gateway" {
+				logger.Debug("Skipping gateway channel message, handled by WebSocket",
+					zap.String("chat_id", msg.ChatID))
+				continue
+			}
+
 			// 特殊处理 cron 消息：如果 chat_id 为空，尝试路由到配置的飞书聊天
 			if msg.Channel == "cron" && msg.ChatID == "" {
 				// 查找飞书通道的 cron_output_chat_id 配置

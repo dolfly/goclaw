@@ -11,38 +11,59 @@ import (
 
 // RegisterAcpMethods registers ACP-related gateway methods.
 func RegisterAcpMethods(registry *MethodRegistry, cfg *config.Config, acpManager *acp.Manager) {
-	// acp/spawn - Create a new ACP session
+	// acp_spawn - Create a new ACP session
 	registry.Register("acp_spawn", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpSpawn(cfg, acpManager, sessionID, params)
 	})
 
 	// acp_status - Get ACP session status
 	registry.Register("acp_status", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpStatus(cfg, acpManager, sessionID, params)
 	})
 
 	// acp_set_mode - Set runtime mode for ACP session
 	registry.Register("acp_set_mode", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpSetMode(cfg, acpManager, sessionID, params)
 	})
 
 	// acp_set_config_option - Set config option on ACP session
 	registry.Register("acp_set_config_option", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpSetConfigOption(cfg, acpManager, sessionID, params)
 	})
 
 	// acp_cancel - Cancel active ACP turn
 	registry.Register("acp_cancel", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpCancel(cfg, acpManager, sessionID, params)
 	})
 
 	// acp_close - Close ACP session
 	registry.Register("acp_close", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpClose(cfg, acpManager, sessionID, params)
 	})
 
 	// acp_list - List all ACP sessions
 	registry.Register("acp_list", func(sessionID string, params map[string]interface{}) (interface{}, error) {
+		if acpManager == nil {
+			return nil, fmt.Errorf("ACP is not enabled")
+		}
 		return handleAcpList(cfg, acpManager, sessionID, params)
 	})
 }

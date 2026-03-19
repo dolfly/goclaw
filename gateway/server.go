@@ -569,9 +569,48 @@ func (s *Server) broadcastOutbound(ctx context.Context) {
 			}
 
 			logger.Debug("Broadcasting to WebSocket connections",
+				zap.String("channel", msg.Channel),
+				zap.String("chat_id", msg.ChatID),
 				zap.Int("connections", len(s.connections)))
 
-			// 广播到所有连接
+			// 如果是 gateway channel 的消息，定向发送给特定 session
+			if msg.Channel == "gateway" {
+				s.connectionsMu.RLock()
+				found := false
+				for _, conn := range s.connections {
+					if conn.ID == msg.ChatID {
+						found = true
+						// 创建通知
+						notif, err := s.handler.BroadcastNotification("chat.response", map[string]interface{}{
+							"content":   msg.Content,
+							"timestamp": msg.Timestamp,
+						})
+						if err != nil {
+							logger.Error("Failed to create notification", zap.Error(err))
+							continue
+						}
+
+						// 发送通知
+						if err := conn.SendMessage(websocket.TextMessage, notif); err != nil {
+							logger.Error("Failed to send notification",
+								zap.String("session_id", conn.ID),
+								zap.Error(err))
+						} else {
+							logger.Info("Chat response sent to WebSocket client",
+								zap.String("session_id", conn.ID),
+								zap.String("content", msg.Content))
+						}
+					}
+				}
+				if !found {
+					logger.Warn("No WebSocket connection found for gateway message",
+						zap.String("chat_id", msg.ChatID))
+				}
+				s.connectionsMu.RUnlock()
+				continue
+			}
+
+			// 其他 channel 的消息，广播到所有连接
 			s.connectionsMu.RLock()
 			for _, conn := range s.connections {
 				// 创建通知

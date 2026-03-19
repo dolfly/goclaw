@@ -8,19 +8,14 @@ import (
 
 // registerAcpMethods 注册 ACP 方法
 func (h *Handler) registerAcpMethods() {
-	// Use reflection to properly check if interface is nil
-	// This handles the case where a typed nil pointer is passed as interface{}
-	if h.acpMgr == nil || reflect.ValueOf(h.acpMgr).IsNil() {
-		return
+	// Check if ACP manager is available
+	var acpManager *acp.Manager
+	if h.acpMgr != nil && !reflect.ValueOf(h.acpMgr).IsNil() {
+		if mgr, ok := h.acpMgr.(*acp.Manager); ok {
+			acpManager = mgr
+		}
 	}
 
-	// Type assert to *acp.Manager
-	acpManager, ok := h.acpMgr.(*acp.Manager)
-	if !ok {
-		// Not a valid ACP manager, skip registration
-		return
-	}
-
-	// Register ACP methods using the gateway registration function
+	// Register ACP methods - if ACP is not enabled, methods will return appropriate error
 	RegisterAcpMethods(h.registry, h.cfg, acpManager)
 }
