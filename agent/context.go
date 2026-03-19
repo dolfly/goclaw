@@ -501,7 +501,7 @@ func (b *ContextBuilder) buildSelectedSkills(selectedSkillNames []string, skills
 				}
 
 				if len(skill.Resources) > 0 {
-					sb.WriteString("**⏰ Resources File Path: \n")
+					sb.WriteString("**⏰ Resources - this skill use resource or scrpit file path list: \n")
 					for k, resource := range skill.Resources {
 						sb.WriteString(fmt.Sprintf("* %s : %s\n", k, resource))
 					}

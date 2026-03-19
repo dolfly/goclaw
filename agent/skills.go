@@ -194,8 +194,10 @@ func (l *SkillsLoader) loadSkill(path string) error {
 		skill.Name = filepath.Base(path)
 	}
 
-	if err = l.loadResource(&skill, path); err != nil {
-		return err
+	if resourcePath, re := filepath.Abs(path); re == nil {
+		if err = l.loadResource(&skill, resourcePath); err != nil {
+			return err
+		}
 	}
 
 	l.skills[skill.Name] = &skill
