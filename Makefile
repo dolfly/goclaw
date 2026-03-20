@@ -1,4 +1,4 @@
-.PHONY: help all build test test-race test-coverage test-verbose lint fmt fmt-check vet clean deps tidy check install-tools benchmark build-ui build-full setup-tauri build-tauri dev-tauri prepare-sidecar prepare-tauri-sidecar
+.PHONY: help all build test test-race test-coverage test-verbose lint fmt fmt-check vet clean deps tidy check install-tools benchmark build-ui build-full setup-tauri build-tauri dev-tauri prepare-sidecar prepare-tauri-sidecar release-tauri-macos notarize-tauri-macos staple-tauri-macos verify-tauri-macos
 
 # Variables
 GOCMD=go
@@ -17,6 +17,13 @@ DOCKER_TAG=$(VERSION)
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
 GO_CACHE_DIR=$(CURDIR)/.gocache
+MACOS_SIGNING_IDENTITY?=
+APPLE_ID?=
+APPLE_PASSWORD?=
+APPLE_TEAM_ID?=
+TAURI_BUNDLE_DIR=$(CURDIR)/src-tauri/target/release/bundle
+TAURI_MACOS_APP=$(firstword $(wildcard $(TAURI_BUNDLE_DIR)/macos/*.app))
+TAURI_MACOS_DMG=$(firstword $(wildcard $(TAURI_BUNDLE_DIR)/dmg/*.dmg))
 
 # Colors for terminal output
 COLOR_RESET=\033[0m
@@ -346,3 +353,41 @@ build-tauri-current:
 	@$(MAKE) prepare-tauri-sidecar
 	cargo tauri build
 	@echo "$(COLOR_GREEN)Tauri build complete for current platform$(COLOR_RESET)"
+
+## release-tauri-macos: Build signed macOS release bundles (.app/.dmg)
+release-tauri-macos:
+	@echo "$(COLOR_BLUE)Building signed macOS Tauri bundle...$(COLOR_RESET)"
+	@test -n "$(MACOS_SIGNING_IDENTITY)" || (echo "$(COLOR_YELLOW)Set MACOS_SIGNING_IDENTITY first$(COLOR_RESET)" && exit 1)
+	@$(MAKE) prepare-tauri-sidecar
+	cargo tauri build --config '{"tauri":{"bundle":{"macOS":{"signingIdentity":"$(MACOS_SIGNING_IDENTITY)"}}}}'
+	@echo "$(COLOR_GREEN)Signed macOS bundle built$(COLOR_RESET)"
+	@echo "App: $(TAURI_BUNDLE_DIR)/macos/"
+	@echo "DMG: $(TAURI_BUNDLE_DIR)/dmg/"
+
+## notarize-tauri-macos: Submit built DMG to Apple notarization
+notarize-tauri-macos:
+	@echo "$(COLOR_BLUE)Submitting DMG for notarization...$(COLOR_RESET)"
+	@test -n "$(APPLE_ID)" || (echo "$(COLOR_YELLOW)Set APPLE_ID first$(COLOR_RESET)" && exit 1)
+	@test -n "$(APPLE_PASSWORD)" || (echo "$(COLOR_YELLOW)Set APPLE_PASSWORD first$(COLOR_RESET)" && exit 1)
+	@test -n "$(APPLE_TEAM_ID)" || (echo "$(COLOR_YELLOW)Set APPLE_TEAM_ID first$(COLOR_RESET)" && exit 1)
+	@test -n "$(TAURI_MACOS_DMG)" || (echo "$(COLOR_YELLOW)No DMG found under $(TAURI_BUNDLE_DIR)/dmg$(COLOR_RESET)" && exit 1)
+	xcrun notarytool submit "$(TAURI_MACOS_DMG)" --apple-id "$(APPLE_ID)" --password "$(APPLE_PASSWORD)" --team-id "$(APPLE_TEAM_ID)" --wait
+	@echo "$(COLOR_GREEN)Notarization completed$(COLOR_RESET)"
+
+## staple-tauri-macos: Staple notarization ticket to built app and DMG
+staple-tauri-macos:
+	@echo "$(COLOR_BLUE)Stapling notarization ticket...$(COLOR_RESET)"
+	@test -n "$(TAURI_MACOS_APP)" || (echo "$(COLOR_YELLOW)No app found under $(TAURI_BUNDLE_DIR)/macos$(COLOR_RESET)" && exit 1)
+	@test -n "$(TAURI_MACOS_DMG)" || (echo "$(COLOR_YELLOW)No DMG found under $(TAURI_BUNDLE_DIR)/dmg$(COLOR_RESET)" && exit 1)
+	xcrun stapler staple "$(TAURI_MACOS_APP)"
+	xcrun stapler staple "$(TAURI_MACOS_DMG)"
+	@echo "$(COLOR_GREEN)Stapling completed$(COLOR_RESET)"
+
+## verify-tauri-macos: Verify app signature and Gatekeeper assessment
+verify-tauri-macos:
+	@echo "$(COLOR_BLUE)Verifying macOS bundle...$(COLOR_RESET)"
+	@test -n "$(TAURI_MACOS_APP)" || (echo "$(COLOR_YELLOW)No app found under $(TAURI_BUNDLE_DIR)/macos$(COLOR_RESET)" && exit 1)
+	codesign -dv --verbose=4 "$(TAURI_MACOS_APP)"
+	spctl -a -vv "$(TAURI_MACOS_APP)"
+	@if [ -n "$(TAURI_MACOS_DMG)" ]; then spctl -a -vv "$(TAURI_MACOS_DMG)"; fi
+	@echo "$(COLOR_GREEN)Verification completed$(COLOR_RESET)"

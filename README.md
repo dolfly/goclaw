@@ -327,7 +327,7 @@ Dashboard 功能：
 
 桌面版现在是一个本地壳程序：
 
-- 启动时先拉起 sidecar `goclaw gateway run`
+- 启动时先拉起 sidecar `goclaw start`
 - 等待 `127.0.0.1:28789` 就绪
 - 自动在同一个窗口打开 `http://127.0.0.1:28789/dashboard/`
 - 如果启动失败，会停留在本地启动页，并提供重启后端、打开配置文件的按钮
@@ -368,6 +368,8 @@ make dev-tauri
 3. Dashboard 中的 RPC 和 WebSocket 都能正常工作。
 4. 关闭应用后，28789 端口不应残留由本应用启动的 sidecar 进程。
 5. 如果故意把配置改坏，应用应停留在启动页，并能通过 “Restart Backend” 和 “Open Config” 恢复。
+
+macOS 发布与公证流程见 [docs/release-macos.md](/Users/chaoyuepan/ai/goclaw/docs/release-macos.md)。
 
 ### 使用示例
 
