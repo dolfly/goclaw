@@ -2,10 +2,17 @@ package channels
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/disintegration/imaging"
 	"github.com/mdp/qrterminal"
 	"github.com/smallnest/goclaw/internal/logger"
 	"go.uber.org/zap"
@@ -136,8 +143,20 @@ func (l *WeixinLogin) displayQRCode(qrURL string) error {
 	fmt.Println("═══════════════════════════════════════════")
 	fmt.Println()
 
-	// Generate and display QR code in terminal
-	qrterminal.Generate(qrURL, qrterminal.L, os.Stdout)
+	// Download the QR code image from the URL
+	qrImage, err := downloadQRCodeImage(qrURL)
+	if err != nil {
+		// If we can't download the image, just show the URL
+		fmt.Println("QR Code URL:", qrURL)
+		fmt.Println()
+		fmt.Println("Please open the URL above in a browser to see the QR code.")
+		fmt.Println()
+		fmt.Println("Waiting for scan...")
+		return nil
+	}
+
+	// Display the QR code image in terminal
+	displayImageInTerminal(qrImage)
 
 	fmt.Println()
 	fmt.Println("QR Code URL:", qrURL)
@@ -145,6 +164,94 @@ func (l *WeixinLogin) displayQRCode(qrURL string) error {
 	fmt.Println("Waiting for scan...")
 
 	return nil
+}
+
+// downloadQRCodeImage downloads a QR code image from a URL
+func downloadQRCodeImage(url string) (image.Image, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download QR code: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download QR code: status %d", resp.StatusCode)
+	}
+
+	img, _, err := image.Decode(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode QR code image: %w", err)
+	}
+
+	return img, nil
+}
+
+// displayImageInTerminal displays an image in the terminal using ASCII art
+func displayImageInTerminal(img image.Image) {
+	// Resize image to fit terminal (approximately 40 characters wide)
+	resized := imaging.Resize(img, 40, 0, imaging.Lanczos)
+	bounds := resized.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// ASCII characters for different brightness levels
+	chars := " .:-=+*#%@"
+
+	for y := 0; y < height; y++ {
+		var line string
+		for x := 0; x < width; x++ {
+			c := resized.At(x, y)
+			// Convert to grayscale
+			r, g, b, _ := c.RGBA()
+			gray := (r + g + b) / 3
+			// Map to character
+			charIndex := int(gray * uint32(len(chars)-1)) / 65535
+			if charIndex >= len(chars) {
+				charIndex = len(chars) - 1
+			}
+			line += string(chars[charIndex]) + string(chars[charIndex])
+		}
+		fmt.Println(line)
+	}
+}
+
+// displayQRCodeFromData encodes data directly into a QR code and displays it
+func displayQRCodeFromData(data string) {
+	qrterminal.Generate(data, qrterminal.L, os.Stdout)
+}
+
+// displayQRCodeAsBase64 downloads and converts to base64 for debugging
+func displayQRCodeAsBase64(url string) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Println("Failed to fetch QR code image")
+		return
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Failed to read QR code image")
+		return
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	fmt.Printf("QR Code Base64 (len=%d): %s...\n", len(encoded), encoded[:min(100, len(encoded))])
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // Logout logs out from Weixin
