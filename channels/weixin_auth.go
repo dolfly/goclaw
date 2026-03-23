@@ -127,22 +127,21 @@ func (a *WeixinAuth) DeleteToken(accountID string) error {
 	return a.tokenStore.Delete(accountID)
 }
 
-// StartQRLogin initiates QR code login flow
-func (a *WeixinAuth) StartQRLogin(ctx context.Context) (*GetBotQRCodeResp, error) {
+// StartQRLogin initiates QR code login flow (GET request)
+func (a *WeixinAuth) StartQRLogin(ctx context.Context) (*QRCodeResponse, error) {
 	resp, err := a.apiClient.GetBotQRCode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get QR code: %w", err)
 	}
 
 	logger.Info("QR code generated",
-		zap.String("qrcode_url", resp.QRCodeURL),
-		zap.String("session_key", resp.SessionKey))
+		zap.String("qrcode_img_content", resp.QRCodeImgContent))
 
 	return resp, nil
 }
 
-// WaitForLogin waits for the user to scan the QR code
-func (a *WeixinAuth) WaitForLogin(ctx context.Context, sessionKey string, onStatus func(status int)) (*TokenInfo, error) {
+// WaitForLogin waits for the user to scan the QR code (GET polling)
+func (a *WeixinAuth) WaitForLogin(ctx context.Context, qrcode string, onStatus func(status string)) (*TokenInfo, error) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -151,7 +150,7 @@ func (a *WeixinAuth) WaitForLogin(ctx context.Context, sessionKey string, onStat
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-ticker.C:
-			status, err := a.apiClient.GetQRCodeStatus(ctx, sessionKey)
+			status, err := a.apiClient.GetQRCodeStatus(ctx, qrcode)
 			if err != nil {
 				logger.Warn("Failed to check QR code status", zap.Error(err))
 				continue
@@ -162,23 +161,23 @@ func (a *WeixinAuth) WaitForLogin(ctx context.Context, sessionKey string, onStat
 			}
 
 			switch status.Status {
-			case QRCodeStatusWaiting:
+			case "wait":
 				// Continue waiting
 				logger.Debug("Waiting for QR code scan")
-			case QRCodeStatusScanned:
+			case "scaned":
 				logger.Info("QR code scanned, waiting for confirmation")
-			case QRCodeStatusConfirmed:
+			case "confirmed":
 				logger.Info("Login confirmed",
-					zap.String("user_id", status.UserID),
-					zap.String("nick_name", status.NickName))
+					zap.String("ilink_bot_id", status.ILinkBotID),
+					zap.String("ilink_user_id", status.ILinkUserID))
 
 				return &TokenInfo{
-					Token:     status.Token,
-					UserID:    status.UserID,
-					NickName:  status.NickName,
-					ExpiresAt: time.Now().Add(time.Duration(status.ExpiresIn) * time.Second).Unix(),
+					Token:       status.BotToken,
+					ILinkBotID:  status.ILinkBotID,
+					ILinkUserID: status.ILinkUserID,
+					BaseURL:     status.BaseURL,
 				}, nil
-			case QRCodeStatusExpired:
+			case "expired":
 				return nil, fmt.Errorf("QR code expired")
 			}
 		}
@@ -187,21 +186,21 @@ func (a *WeixinAuth) WaitForLogin(ctx context.Context, sessionKey string, onStat
 
 // LoginWithQRCode performs the complete QR code login flow
 func (a *WeixinAuth) LoginWithQRCode(ctx context.Context, accountID string, displayQR func(url string) error) (*TokenInfo, error) {
-	// Get QR code
+	// Get QR code (GET request)
 	qrResp, err := a.StartQRLogin(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Display QR code
+	// Display QR code - qrcode_img_content is the URL to encode
 	if displayQR != nil {
-		if err := displayQR(qrResp.QRCodeURL); err != nil {
+		if err := displayQR(qrResp.QRCodeImgContent); err != nil {
 			return nil, fmt.Errorf("failed to display QR code: %w", err)
 		}
 	}
 
-	// Wait for login
-	tokenInfo, err := a.WaitForLogin(ctx, qrResp.SessionKey, nil)
+	// Wait for login (poll with GET requests)
+	tokenInfo, err := a.WaitForLogin(ctx, qrResp.QRCode, nil)
 	if err != nil {
 		return nil, err
 	}

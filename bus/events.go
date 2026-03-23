@@ -19,10 +19,11 @@ type InboundMessage struct {
 
 // Media 媒体文件
 type Media struct {
-	Type     string `json:"type"`     // image, video, audio, document
-	URL      string `json:"url"`      // 文件URL
-	Base64   string `json:"base64"`   // Base64编码内容
-	MimeType string `json:"mimetype"` // MIME类型
+	Type     string                 `json:"type"`              // image, video, audio, document
+	URL      string                 `json:"url"`               // 文件URL
+	Base64   string                 `json:"base64"`            // Base64编码内容
+	MimeType string                 `json:"mimetype"`          // MIME类型
+	Metadata map[string]interface{} `json:"metadata,omitempty"` // 额外元数据（如加密参数等）
 }
 
 // SessionKey 返回会话键

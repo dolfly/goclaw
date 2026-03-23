@@ -7,12 +7,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"mime"
-	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
 // WeixinMediaHandler handles media file operations
@@ -110,132 +106,33 @@ func AESDecrypt(ciphertext, key []byte) ([]byte, error) {
 	return PKCS7Unpad(plaintext)
 }
 
-// UploadFile uploads a file to Weixin CDN
-func (h *WeixinMediaHandler) UploadFile(ctx context.Context, filePath, toUserID string) (*CDNMedia, error) {
-	// Read file
-	fileData, err := os.ReadFile(filePath)
+// DownloadMedia downloads and decrypts media from CDN using encrypt_query_param
+func (h *WeixinMediaHandler) DownloadMedia(ctx context.Context, encryptQueryParam, aesKeyBase64 string) ([]byte, error) {
+	// Download encrypted data from CDN
+	cdnURL := h.cdnBaseURL + "/" + encryptQueryParam
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cdnURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Get file info
-	fileName := filepath.Base(filePath)
-	fileExt := strings.TrimPrefix(filepath.Ext(filePath), ".")
-	if fileExt == "" {
-		fileExt = "bin"
-	}
-
-	// Determine MIME type
-	mimeType := mime.TypeByExtension(filepath.Ext(filePath))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	// Get upload URL
-	uploadReq := &GetUploadUrlReq{
-		ToUserID:      toUserID,
-		FileName:      fileName,
-		FileExtension: fileExt,
-		FileSize:      int64(len(fileData)),
-		MimeType:      mimeType,
-	}
-
-	uploadResp, err := h.apiClient.GetUploadURL(ctx, uploadReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get upload URL: %w", err)
-	}
-
-	// Decode AES key
-	aesKey, err := base64.StdEncoding.DecodeString(uploadResp.AESKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode AES key: %w", err)
-	}
-
-	// Encrypt file data
-	encryptedData, err := AESEncrypt(fileData, aesKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt file: %w", err)
-	}
-
-	// Upload to CDN
-	if err := h.apiClient.UploadToCDN(ctx, uploadResp.UploadURL, encryptedData); err != nil {
-		return nil, fmt.Errorf("failed to upload to CDN: %w", err)
-	}
-
-	return &CDNMedia{
-		CDNMediaID:    uploadResp.CDNMediaID,
-		AESKey:        uploadResp.AESKey,
-		EncryptedSize: int64(len(encryptedData)),
-		OriginalSize:  int64(len(fileData)),
-		FileName:      fileName,
-		FileExtension: fileExt,
-		MimeType:      mimeType,
-	}, nil
-}
-
-// UploadData uploads data to Weixin CDN
-func (h *WeixinMediaHandler) UploadData(ctx context.Context, data []byte, fileName, toUserID string, itemType int) (*CDNMedia, error) {
-	fileExt := filepath.Ext(fileName)
-	if strings.HasPrefix(fileExt, ".") {
-		fileExt = fileExt[1:]
-	}
-
-	mimeType := mime.TypeByExtension(filepath.Ext(fileName))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	uploadReq := &GetUploadUrlReq{
-		ToUserID:      toUserID,
-		FileName:      fileName,
-		FileExtension: fileExt,
-		FileSize:      int64(len(data)),
-		MimeType:      mimeType,
-	}
-
-	uploadResp, err := h.apiClient.GetUploadURL(ctx, uploadReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get upload URL: %w", err)
-	}
-
-	// Decode AES key
-	aesKey, err := base64.StdEncoding.DecodeString(uploadResp.AESKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode AES key: %w", err)
-	}
-
-	// Encrypt data
-	encryptedData, err := AESEncrypt(data, aesKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt data: %w", err)
-	}
-
-	// Upload to CDN
-	if err := h.apiClient.UploadToCDN(ctx, uploadResp.UploadURL, encryptedData); err != nil {
-		return nil, fmt.Errorf("failed to upload to CDN: %w", err)
-	}
-
-	return &CDNMedia{
-		CDNMediaID:    uploadResp.CDNMediaID,
-		AESKey:        uploadResp.AESKey,
-		EncryptedSize: int64(len(encryptedData)),
-		OriginalSize:  int64(len(data)),
-		FileName:      fileName,
-		FileExtension: fileExt,
-		MimeType:      mimeType,
-	}, nil
-}
-
-// DownloadFile downloads and decrypts a file from CDN
-func (h *WeixinMediaHandler) DownloadFile(ctx context.Context, cdnMedia *CDNMedia) ([]byte, error) {
-	// Download encrypted data
-	encryptedData, err := h.apiClient.DownloadFromCDN(ctx, cdnMedia)
+	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download from CDN: %w", err)
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("CDN download failed with status %d", resp.StatusCode)
+	}
+
+	encryptedData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CDN response: %w", err)
+	}
 
 	// Decode AES key
-	aesKey, err := base64.StdEncoding.DecodeString(cdnMedia.AESKey)
+	aesKey, err := base64.StdEncoding.DecodeString(aesKeyBase64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode AES key: %w", err)
 	}
@@ -249,50 +146,49 @@ func (h *WeixinMediaHandler) DownloadFile(ctx context.Context, cdnMedia *CDNMedi
 	return decryptedData, nil
 }
 
+// UploadMedia uploads media to CDN and returns upload_param
+func (h *WeixinMediaHandler) UploadMedia(ctx context.Context, data []byte, fileKey, toUserID string, mediaType int) (string, string, error) {
+	// TODO: Implement proper upload flow:
+	// 1. Generate AES key
+	// 2. Encrypt data with AES-128-ECB
+	// 3. Calculate MD5 and sizes
+	// 4. Call getUploadUrl
+	// 5. PUT encrypted data to CDN URL
+	// 6. Return upload_param
+
+	return "", "", fmt.Errorf("not implemented")
+}
+
+// UploadFile uploads a file to Weixin CDN (placeholder - needs proper implementation)
+func (h *WeixinMediaHandler) UploadFile(ctx context.Context, filePath, toUserID string) error {
+	// Read file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	_ = data // TODO: Implement upload
+	return fmt.Errorf("file upload not implemented yet")
+}
+
+// UploadData uploads data to Weixin CDN (placeholder - needs proper implementation)
+func (h *WeixinMediaHandler) UploadData(ctx context.Context, data []byte, fileName, toUserID string) error {
+	_ = data
+	_ = fileName
+	_ = toUserID
+	return fmt.Errorf("data upload not implemented yet")
+}
+
+// DownloadFile downloads and decrypts a file from CDN
+func (h *WeixinMediaHandler) DownloadFile(ctx context.Context, encryptQueryParam, aesKeyBase64 string) ([]byte, error) {
+	return h.DownloadMedia(ctx, encryptQueryParam, aesKeyBase64)
+}
+
 // DownloadToBase64 downloads a file and returns as base64 string
-func (h *WeixinMediaHandler) DownloadToBase64(ctx context.Context, cdnMedia *CDNMedia) (string, error) {
-	data, err := h.DownloadFile(ctx, cdnMedia)
+func (h *WeixinMediaHandler) DownloadToBase64(ctx context.Context, encryptQueryParam, aesKeyBase64 string) (string, error) {
+	data, err := h.DownloadMedia(ctx, encryptQueryParam, aesKeyBase64)
 	if err != nil {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
-}
-
-// MultipartUpload handles multipart upload for large files
-func (h *WeixinMediaHandler) MultipartUpload(ctx context.Context, uploadURL string, data []byte, contentType string) error {
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	part, err := writer.CreateFormFile("file", "file")
-	if err != nil {
-		return fmt.Errorf("failed to create form file: %w", err)
-	}
-
-	if _, err := io.Copy(part, bytes.NewReader(data)); err != nil {
-		return fmt.Errorf("failed to copy data: %w", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		return fmt.Errorf("failed to close multipart writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, body)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to upload: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
 }

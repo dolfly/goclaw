@@ -68,7 +68,7 @@ func (c *WeixinChannel) Start(ctx context.Context) error {
 			c.apiClient.SetToken(tokenInfo.Token)
 			logger.Info("Loaded token from storage",
 				zap.String("account_id", c.AccountID()),
-				zap.String("user_id", tokenInfo.UserID))
+				zap.String("ilink_bot_id", tokenInfo.ILinkBotID))
 		} else if tokenInfo != nil {
 			logger.Warn("Stored token has expired",
 				zap.String("account_id", c.AccountID()))
@@ -77,7 +77,7 @@ func (c *WeixinChannel) Start(ctx context.Context) error {
 
 	// Check if token is available
 	if c.apiClient.GetToken() == "" {
-		return fmt.Errorf("no token available, please login first using 'goclaw weixin login %s'", c.AccountID())
+		return fmt.Errorf("no token available, please login first using 'goclaw channels weixin login %s'", c.AccountID())
 	}
 
 	// Get initial config (including typing ticket)
@@ -118,7 +118,7 @@ func (c *WeixinChannel) refreshConfig(ctx context.Context) {
 
 // refreshTypingTicket refreshes the typing ticket
 func (c *WeixinChannel) refreshTypingTicket(ctx context.Context) error {
-	config, err := c.apiClient.GetConfig(ctx)
+	config, err := c.apiClient.GetConfig(ctx, "", "")
 	if err != nil {
 		return err
 	}
@@ -172,6 +172,13 @@ func (c *WeixinChannel) receiveMessages(ctx context.Context) {
 					}
 					continue
 				}
+			}
+
+			// Check for session timeout error
+			if resp.ErrCode == -14 {
+				logger.Error("Weixin session expired, need to re-login",
+					zap.Int("errcode", resp.ErrCode))
+				return
 			}
 
 			// Reset backoff on success
@@ -240,11 +247,8 @@ func (c *WeixinChannel) extractContent(msg *WeixinMessage) string {
 	var parts []string
 
 	for _, item := range msg.ItemList {
-		switch item.ItemType {
-		case MessageItemTypeText:
-			if item.Text != nil {
-				parts = append(parts, item.Text.Text)
-			}
+		if item.Type == MessageItemTypeText && item.TextItem != nil {
+			parts = append(parts, item.TextItem.Text)
 		}
 	}
 
@@ -252,47 +256,55 @@ func (c *WeixinChannel) extractContent(msg *WeixinMessage) string {
 }
 
 // extractMedia extracts media from a message
-func (c *WeixinChannel) extractMedia(msg *WeixinMessage) []bus.Media {
+func (c *WeixinMediaHandler) extractMediaFromMessage(msg *WeixinMessage) []bus.Media {
 	var media []bus.Media
 
 	for _, item := range msg.ItemList {
 		var m bus.Media
-		var cdn *CDNMedia
 
-		switch item.ItemType {
+		switch item.Type {
 		case MessageItemTypeImage:
-			cdn = item.Image
 			m.Type = "image"
-		case MessageItemTypeVoice:
-			cdn = item.Voice
-			m.Type = "audio"
-		case MessageItemTypeVideo:
-			cdn = &item.Video.CDNMedia
-			m.Type = "video"
-		case MessageItemTypeFile:
-			cdn = &item.File.CDNMedia
-			m.Type = "document"
-		default:
-			continue
-		}
-
-		if cdn != nil {
-			m.MimeType = cdn.MimeType
-			m.URL = cdn.DownloadURL
-
-			// Download and encode media (for smaller files)
-			if cdn.OriginalSize < 10*1024*1024 && cdn.AESKey != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				if base64, err := c.media.DownloadToBase64(ctx, cdn); err == nil {
-					m.Base64 = base64
-				} else {
-					logger.Warn("Failed to download media",
-						zap.Error(err),
-						zap.String("cdn_media_id", cdn.CDNMediaID))
+			if item.ImageItem != nil && item.ImageItem.Media != nil {
+				m.URL = item.ImageItem.URL
+				// Store encrypt_query_param for later download
+				m.Metadata = map[string]interface{}{
+					"encrypt_query_param": item.ImageItem.Media.EncryptQueryParam,
+					"aes_key":             item.ImageItem.Media.AESKey,
 				}
 			}
+		case MessageItemTypeVoice:
+			m.Type = "audio"
+			if item.VoiceItem != nil && item.VoiceItem.Media != nil {
+				m.Metadata = map[string]interface{}{
+					"encrypt_query_param": item.VoiceItem.Media.EncryptQueryParam,
+					"aes_key":             item.VoiceItem.Media.AESKey,
+					"playtime":            item.VoiceItem.Playtime,
+				}
+			}
+		case MessageItemTypeVideo:
+			m.Type = "video"
+			if item.VideoItem != nil && item.VideoItem.Media != nil {
+				m.Metadata = map[string]interface{}{
+					"encrypt_query_param": item.VideoItem.Media.EncryptQueryParam,
+					"aes_key":             item.VideoItem.Media.AESKey,
+					"play_length":         item.VideoItem.PlayLength,
+				}
+			}
+		case MessageItemTypeFile:
+			m.Type = "document"
+			if item.FileItem != nil && item.FileItem.Media != nil {
+				m.MimeType = "application/octet-stream"
+				if item.FileItem.FileName != "" {
+					m.Metadata = map[string]interface{}{
+						"file_name":           item.FileItem.FileName,
+						"encrypt_query_param": item.FileItem.Media.EncryptQueryParam,
+						"aes_key":             item.FileItem.Media.AESKey,
+					}
+				}
+			}
+		default:
+			continue
 		}
 
 		media = append(media, m)
@@ -301,18 +313,16 @@ func (c *WeixinChannel) extractMedia(msg *WeixinMessage) []bus.Media {
 	return media
 }
 
+// extractMedia wraps the media handler function
+func (c *WeixinChannel) extractMedia(msg *WeixinMessage) []bus.Media {
+	return c.media.extractMediaFromMessage(msg)
+}
+
 // Send sends a message
 func (c *WeixinChannel) Send(msg *bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return fmt.Errorf("weixin channel is not running")
 	}
-
-	// Send typing indicator
-	go func() {
-		if err := c.sendTypingIndicator(msg.ChatID, true); err != nil {
-			logger.Debug("Failed to send typing indicator", zap.Error(err))
-		}
-	}()
 
 	// Build message items
 	var items []MessageItem
@@ -320,23 +330,11 @@ func (c *WeixinChannel) Send(msg *bus.OutboundMessage) error {
 	// Add text content
 	if msg.Content != "" {
 		items = append(items, MessageItem{
-			ItemType: MessageItemTypeText,
-			Text: &TextItem{
+			Type: MessageItemTypeText,
+			TextItem: &TextItem{
 				Text: msg.Content,
 			},
 		})
-	}
-
-	// Add media content
-	for _, m := range msg.Media {
-		item, err := c.buildMediaItem(context.Background(), m, msg.ChatID)
-		if err != nil {
-			logger.Warn("Failed to build media item",
-				zap.Error(err),
-				zap.String("type", m.Type))
-			continue
-		}
-		items = append(items, *item)
 	}
 
 	// Get context token
@@ -349,8 +347,7 @@ func (c *WeixinChannel) Send(msg *bus.OutboundMessage) error {
 		ItemList:     items,
 	}
 
-	resp, err := c.apiClient.SendMessage(context.Background(), req)
-	if err != nil {
+	if err := c.apiClient.SendMessage(context.Background(), req); err != nil {
 		// Check for session expired error
 		if strings.Contains(err.Error(), "-14") {
 			// Clear context token
@@ -359,12 +356,8 @@ func (c *WeixinChannel) Send(msg *bus.OutboundMessage) error {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
-	// Stop typing indicator
-	_ = c.sendTypingIndicator(msg.ChatID, false)
-
 	logger.Info("Weixin message sent",
-		zap.String("chat_id", msg.ChatID),
-		zap.Int64("message_id", resp.MessageID))
+		zap.String("chat_id", msg.ChatID))
 
 	return nil
 }
@@ -406,90 +399,6 @@ func (c *WeixinChannel) SendStream(chatID string, stream <-chan *bus.StreamMessa
 	}
 
 	return nil
-}
-
-// sendTypingIndicator sends typing status
-func (c *WeixinChannel) sendTypingIndicator(chatID string, typing bool) error {
-	ticket := c.getTypingTicket()
-	if ticket == "" {
-		return nil // No typing ticket available
-	}
-
-	status := 0
-	if typing {
-		status = 1
-	}
-
-	return c.apiClient.SendTyping(context.Background(), &SendTypingReq{
-		ToUserID:     chatID,
-		TypingTicket: ticket,
-		TypingStatus: status,
-	})
-}
-
-// buildMediaItem builds a message item from media
-func (c *WeixinChannel) buildMediaItem(ctx context.Context, m bus.Media, toUserID string) (*MessageItem, error) {
-	item := &MessageItem{}
-
-	// Determine item type
-	switch m.Type {
-	case "image":
-		item.ItemType = MessageItemTypeImage
-	case "audio":
-		item.ItemType = MessageItemTypeVoice
-	case "video":
-		item.ItemType = MessageItemTypeVideo
-	case "document":
-		item.ItemType = MessageItemTypeFile
-	default:
-		item.ItemType = MessageItemTypeFile
-	}
-
-	// Upload media if we have base64 content
-	if m.Base64 != "" {
-		cdn, err := c.uploadBase64(ctx, m.Base64, m.Type, toUserID)
-		if err != nil {
-			return nil, err
-		}
-
-		switch item.ItemType {
-		case MessageItemTypeImage:
-			item.Image = cdn
-		case MessageItemTypeVoice:
-			item.Voice = cdn
-		case MessageItemTypeVideo:
-			item.Video = &VideoItem{CDNMedia: *cdn}
-		case MessageItemTypeFile:
-			item.File = &FileItem{CDNMedia: *cdn}
-		}
-	} else if m.URL != "" {
-		// Download and upload URL
-		// TODO: Implement URL download and upload
-		return nil, fmt.Errorf("URL media not yet supported")
-	}
-
-	return item, nil
-}
-
-// uploadBase64 uploads base64 encoded content
-func (c *WeixinChannel) uploadBase64(ctx context.Context, base64Data, mediaType, toUserID string) (*CDNMedia, error) {
-	// Decode base64
-	// Note: This is simplified - actual implementation should handle proper decoding
-	data := []byte(base64Data) // In real implementation, decode from base64
-
-	fileName := "file"
-	switch mediaType {
-	case "image":
-		fileName = "image.jpg"
-	case "audio":
-		fileName = "audio.mp3"
-	case "video":
-		fileName = "video.mp4"
-	default:
-		fileName = "file.bin"
-	}
-
-	return c.media.UploadData(ctx, data, fileName, toUserID, 0)
 }
 
 // contextTokenKey generates the key for storing context tokens

@@ -1,7 +1,6 @@
 package channels
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/smallnest/goclaw/internal/logger"
@@ -19,6 +19,7 @@ import (
 const (
 	DefaultWeixinBaseURL = "https://ilinkai.weixin.qq.com"
 	DefaultWeixinCDNURL  = "https://novac2c.cdn.weixin.qq.com/c2c"
+	DefaultILinkBotType  = "3"
 )
 
 // WeixinAPIClient is the HTTP client for Weixin API
@@ -56,40 +57,70 @@ func (c *WeixinAPIClient) GetToken() string {
 func generateWechatUIN() string {
 	b := make([]byte, 4)
 	rand.Read(b)
-	return base64.StdEncoding.EncodeToString(b)
+	uint32Val := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", uint32Val)))
 }
 
-// doRequest performs an HTTP request to the Weixin API
-func (c *WeixinAPIClient) doRequest(ctx context.Context, method, path string, reqBody, respBody interface{}) error {
+// buildHeaders builds the common headers for API requests
+func buildHeaders(token string, bodyLength int) map[string]string {
+	headers := map[string]string{
+		"Content-Type":   "application/json",
+		"AuthorizationType": "ilink_bot_token",
+		"X-WECHAT-UIN":  generateWechatUIN(),
+	}
+	if bodyLength > 0 {
+		headers["Content-Length"] = fmt.Sprintf("%d", bodyLength)
+	}
+	if token != "" {
+		headers["Authorization"] = "Bearer " + token
+	}
+	return headers
+}
+
+// ensureTrailingSlash ensures URL ends with /
+func ensureTrailingSlash(u string) string {
+	if len(u) > 0 && u[len(u)-1] != '/' {
+		return u + "/"
+	}
+	return u
+}
+
+// doJSONRequest performs a POST JSON request to the Weixin API
+func (c *WeixinAPIClient) doJSONRequest(ctx context.Context, endpoint string, reqBody, respBody interface{}) error {
 	var bodyReader io.Reader
+	var bodyLen int
+
 	if reqBody != nil {
 		jsonData, err := json.Marshal(reqBody)
 		if err != nil {
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
-		bodyReader = bytes.NewReader(jsonData)
+		bodyReader = NewReaderAt(jsonData)
+		bodyLen = len(jsonData)
+
+		// Add base_info
+		type requestWithBaseInfo struct {
+			BaseInfo map[string]string `json:"base_info"`
+		}
 	}
 
-	url := c.baseURL + "/" + path
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	baseURL := ensureTrailingSlash(c.baseURL)
+	fullURL := baseURL + endpoint
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bodyReader)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	// Set authentication headers if token is available
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-		req.Header.Set("AuthorizationType", "ilink_bot_token")
-		req.Header.Set("X-WECHAT-UIN", generateWechatUIN())
+	headers := buildHeaders(c.token, bodyLen)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	logger.Debug("Weixin API request",
-		zap.String("method", method),
-		zap.String("url", url),
-		zap.String("path", path))
+		zap.String("method", http.MethodPost),
+		zap.String("url", fullURL),
+		zap.String("endpoint", endpoint))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -119,88 +150,213 @@ func (c *WeixinAPIClient) doRequest(ctx context.Context, method, path string, re
 	return nil
 }
 
+// ReaderAt wraps a byte slice to implement io.Reader
+type ReaderAt struct {
+	data []byte
+	pos  int
+}
+
+// NewReaderAt creates a new ReaderAt
+func NewReaderAt(data []byte) *ReaderAt {
+	return &ReaderAt{data: data}
+}
+
+// Read implements io.Reader
+func (r *ReaderAt) Read(p []byte) (n int, err error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	n = copy(p, r.data[r.pos:])
+	r.pos += n
+	return n, nil
+}
+
 // GetUpdates fetches new messages using long polling
 func (c *WeixinAPIClient) GetUpdates(ctx context.Context, req *GetUpdatesReq) (*GetUpdatesResp, error) {
+	// Add base_info to request
+	body := map[string]interface{}{
+		"get_updates_buf": req.GetUpdatesBuf,
+		"base_info": map[string]string{
+			"channel_version": "1.0.0",
+		},
+	}
+
 	resp := &GetUpdatesResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/getupdates", req, resp); err != nil {
+	if err := c.doJSONRequest(ctx, "ilink/bot/getupdates", body, resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
 // SendMessage sends a message to a user
-func (c *WeixinAPIClient) SendMessage(ctx context.Context, req *SendMessageReq) (*SendMessageResp, error) {
-	resp := &SendMessageResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/sendmessage", req, resp); err != nil {
-		return nil, err
+func (c *WeixinAPIClient) SendMessage(ctx context.Context, req *SendMessageReq) error {
+	// Wrap in msg field as per API
+	body := map[string]interface{}{
+		"msg":        req,
+		"base_info": map[string]string{
+			"channel_version": "1.0.0",
+		},
 	}
-	if !resp.IsSuccess() {
-		return nil, fmt.Errorf("send message failed: %s (code: %d)", resp.ErrMsg, resp.ErrCode)
-	}
-	return resp, nil
+	return c.doJSONRequest(ctx, "ilink/bot/sendmessage", body, nil)
 }
 
 // GetUploadURL gets a pre-signed URL for CDN upload
 func (c *WeixinAPIClient) GetUploadURL(ctx context.Context, req *GetUploadUrlReq) (*GetUploadUrlResp, error) {
-	resp := &GetUploadUrlResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/getuploadurl", req, resp); err != nil {
-		return nil, err
+	// Add base_info
+	body := map[string]interface{}{
+		"filekey":         req.FileKey,
+		"media_type":      req.MediaType,
+		"to_user_id":      req.ToUserID,
+		"rawsize":         req.RawSize,
+		"rawfilemd5":      req.RawFileMD5,
+		"filesize":        req.FileSize,
+		"thumb_rawsize":   req.ThumbRawSize,
+		"thumb_rawfilemd5": req.ThumbRawFileMD5,
+		"thumb_filesize":  req.ThumbFileSize,
+		"no_need_thumb":   req.NoNeedThumb,
+		"aeskey":          req.AESKey,
+		"base_info": map[string]string{
+			"channel_version": "1.0.0",
+		},
 	}
-	if !resp.IsSuccess() {
-		return nil, fmt.Errorf("get upload URL failed: %s (code: %d)", resp.ErrMsg, resp.ErrCode)
+
+	resp := &GetUploadUrlResp{}
+	if err := c.doJSONRequest(ctx, "ilink/bot/getuploadurl", body, resp); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
 // GetConfig gets account configuration including typing ticket
-func (c *WeixinAPIClient) GetConfig(ctx context.Context) (*GetConfigResp, error) {
-	resp := &GetConfigResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/getconfig", nil, resp); err != nil {
-		return nil, err
+func (c *WeixinAPIClient) GetConfig(ctx context.Context, ilinkUserID, contextToken string) (*GetConfigResp, error) {
+	body := map[string]interface{}{
+		"ilink_user_id": ilinkUserID,
+		"context_token": contextToken,
+		"base_info": map[string]string{
+			"channel_version": "1.0.0",
+		},
 	}
-	if !resp.IsSuccess() {
-		return nil, fmt.Errorf("get config failed: %s (code: %d)", resp.ErrMsg, resp.ErrCode)
+
+	resp := &GetConfigResp{}
+	if err := c.doJSONRequest(ctx, "ilink/bot/getconfig", body, resp); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
 // SendTyping sends typing indicator
-func (c *WeixinAPIClient) SendTyping(ctx context.Context, req *SendTypingReq) error {
-	resp := &SendTypingResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/sendtyping", req, resp); err != nil {
-		return err
+func (c *WeixinAPIClient) SendTyping(ctx context.Context, ilinkUserID, typingTicket string, status int) error {
+	body := map[string]interface{}{
+		"ilink_user_id": ilinkUserID,
+		"typing_ticket": typingTicket,
+		"status":        status,
+		"base_info": map[string]string{
+			"channel_version": "1.0.0",
+		},
 	}
-	if !resp.IsSuccess() {
-		return fmt.Errorf("send typing failed: %s (code: %d)", resp.ErrMsg, resp.ErrCode)
-	}
-	return nil
+	return c.doJSONRequest(ctx, "ilink/bot/sendtyping", body, nil)
 }
 
-// GetBotQRCode gets the QR code for bot login
-func (c *WeixinAPIClient) GetBotQRCode(ctx context.Context) (*GetBotQRCodeResp, error) {
-	resp := &GetBotQRCodeResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/get_bot_qrcode", nil, resp); err != nil {
-		return nil, err
-	}
-	if !resp.IsSuccess() {
-		return nil, fmt.Errorf("get bot QR code failed: %s (code: %d)", resp.ErrMsg, resp.ErrCode)
-	}
-	return resp, nil
+// QRCodeResponse is the response from get_bot_qrcode API (GET request)
+type QRCodeResponse struct {
+	QRCode           string `json:"qrcode"`              // Unique identifier for polling
+	QRCodeImgContent string `json:"qrcode_img_content"`  // URL to display as QR code
 }
 
-// GetQRCodeStatus checks the QR code scan status
-func (c *WeixinAPIClient) GetQRCodeStatus(ctx context.Context, sessionKey string) (*GetQRCodeStatusResp, error) {
-	req := &GetQRCodeStatusReq{SessionKey: sessionKey}
-	resp := &GetQRCodeStatusResp{}
-	if err := c.doRequest(ctx, http.MethodPost, "ilink/bot/get_qrcode_status", req, resp); err != nil {
-		return nil, err
+// QRCodeStatusResponse is the response from get_qrcode_status API (GET request)
+type QRCodeStatusResponse struct {
+	Status       string `json:"status"`         // "wait", "scaned", "confirmed", "expired"
+	BotToken     string `json:"bot_token"`      // Available when confirmed
+	ILinkBotID   string `json:"ilink_bot_id"`   // Bot ID
+	BaseURL      string `json:"baseurl"`        // API base URL
+	ILinkUserID  string `json:"ilink_user_id"`  // User ID who scanned
+}
+
+// GetBotQRCode gets the QR code for bot login (GET request)
+func (c *WeixinAPIClient) GetBotQRCode(ctx context.Context) (*QRCodeResponse, error) {
+	baseURL := ensureTrailingSlash(c.baseURL)
+	endpoint := fmt.Sprintf("ilink/bot/get_bot_qrcode?bot_type=%s", url.QueryEscape(DefaultILinkBotType))
+	fullURL := baseURL + endpoint
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	return resp, nil
+
+	// Set headers (no auth needed for QR code request)
+	req.Header.Set("Content-Type", "application/json")
+
+	logger.Info("Fetching QR code", zap.String("url", fullURL))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch QR code: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("QR code request failed with status %d: %s", resp.StatusCode, string(respData))
+	}
+
+	var qrResp QRCodeResponse
+	if err := json.Unmarshal(respData, &qrResp); err != nil {
+		return nil, fmt.Errorf("failed to parse QR code response: %w", err)
+	}
+
+	logger.Info("QR code received",
+		zap.Int("qrcode_len", len(qrResp.QRCode)),
+		zap.Int("qrcode_url_len", len(qrResp.QRCodeImgContent)))
+
+	return &qrResp, nil
+}
+
+// GetQRCodeStatus checks the QR code scan status (GET request)
+func (c *WeixinAPIClient) GetQRCodeStatus(ctx context.Context, qrcode string) (*QRCodeStatusResponse, error) {
+	baseURL := ensureTrailingSlash(c.baseURL)
+	endpoint := fmt.Sprintf("ilink/bot/get_qrcode_status?qrcode=%s", url.QueryEscape(qrcode))
+	fullURL := baseURL + endpoint
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("iLink-App-ClientVersion", "1")
+
+	logger.Debug("Polling QR status", zap.String("url", fullURL))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to poll QR status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("QR status request failed with status %d: %s", resp.StatusCode, string(respData))
+	}
+
+	var statusResp QRCodeStatusResponse
+	if err := json.Unmarshal(respData, &statusResp); err != nil {
+		return nil, fmt.Errorf("failed to parse QR status response: %w", err)
+	}
+
+	return &statusResp, nil
 }
 
 // UploadToCDN uploads encrypted data to CDN
 func (c *WeixinAPIClient) UploadToCDN(ctx context.Context, uploadURL string, data []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, NewReaderAt(data))
 	if err != nil {
 		return fmt.Errorf("failed to create upload request: %w", err)
 	}
@@ -222,18 +378,11 @@ func (c *WeixinAPIClient) UploadToCDN(ctx context.Context, uploadURL string, dat
 }
 
 // DownloadFromCDN downloads encrypted data from CDN
-func (c *WeixinAPIClient) DownloadFromCDN(ctx context.Context, cdnMedia *CDNMedia) ([]byte, error) {
-	if cdnMedia.DownloadURL == "" && cdnMedia.DownloadParam == "" {
-		return nil, fmt.Errorf("no download URL available")
-	}
+func (c *WeixinAPIClient) DownloadFromCDN(ctx context.Context, encryptQueryParam string) ([]byte, error) {
+	// Build CDN URL
+	cdnURL := DefaultWeixinCDNURL + "/" + encryptQueryParam
 
-	downloadURL := cdnMedia.DownloadURL
-	if cdnMedia.DownloadParam != "" {
-		// Use download param with CDN base URL
-		downloadURL = DefaultWeixinCDNURL + "/" + cdnMedia.DownloadParam
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cdnURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create download request: %w", err)
 	}

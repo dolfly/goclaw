@@ -2,17 +2,10 @@ package channels
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
-	"io"
-	"net/http"
 	"os"
 	"time"
 
-	"github.com/disintegration/imaging"
 	"github.com/mdp/qrterminal"
 	"github.com/smallnest/goclaw/internal/logger"
 	"go.uber.org/zap"
@@ -20,10 +13,10 @@ import (
 
 // LoginResult represents the result of a login attempt
 type LoginResult struct {
-	Success  bool
-	UserID   string
-	NickName string
-	Message  string
+	Success     bool
+	ILinkBotID  string
+	ILinkUserID string
+	Message     string
 }
 
 // WeixinLogin handles CLI-based Weixin login
@@ -52,7 +45,7 @@ func (l *WeixinLogin) Login(ctx context.Context) (*LoginResult, error) {
 
 // LoginWithDisplay performs the login flow with a custom QR code display function
 func (l *WeixinLogin) LoginWithDisplay(ctx context.Context, displayQR func(url string) error) (*LoginResult, error) {
-	// Start QR code login
+	// Start QR code login (GET request)
 	qrResp, err := l.auth.StartQRLogin(ctx)
 	if err != nil {
 		return &LoginResult{
@@ -61,9 +54,9 @@ func (l *WeixinLogin) LoginWithDisplay(ctx context.Context, displayQR func(url s
 		}, err
 	}
 
-	// Display QR code
+	// Display QR code - qrcode_img_content is the URL to encode into QR
 	if displayQR != nil {
-		if err := displayQR(qrResp.QRCodeURL); err != nil {
+		if err := displayQR(qrResp.QRCodeImgContent); err != nil {
 			return &LoginResult{
 				Success: false,
 				Message: fmt.Sprintf("Failed to display QR code: %v", err),
@@ -71,12 +64,12 @@ func (l *WeixinLogin) LoginWithDisplay(ctx context.Context, displayQR func(url s
 		}
 	}
 
-	// Wait for login with status updates
-	statusChan := make(chan int, 1)
+	// Wait for login with status updates (GET polling)
+	statusChan := make(chan string, 1)
 	resultChan := make(chan *LoginResult, 1)
 
 	go func() {
-		tokenInfo, err := l.auth.WaitForLogin(ctx, qrResp.SessionKey, func(status int) {
+		tokenInfo, err := l.auth.WaitForLogin(ctx, qrResp.QRCode, func(status string) {
 			select {
 			case statusChan <- status:
 			default:
@@ -97,10 +90,10 @@ func (l *WeixinLogin) LoginWithDisplay(ctx context.Context, displayQR func(url s
 		}
 
 		resultChan <- &LoginResult{
-			Success:  true,
-			UserID:   tokenInfo.UserID,
-			NickName: tokenInfo.NickName,
-			Message:  "Login successful",
+			Success:     true,
+			ILinkBotID:  tokenInfo.ILinkBotID,
+			ILinkUserID: tokenInfo.ILinkUserID,
+			Message:     "Login successful",
 		}
 	}()
 
@@ -114,9 +107,9 @@ func (l *WeixinLogin) LoginWithDisplay(ctx context.Context, displayQR func(url s
 			}, ctx.Err()
 		case status := <-statusChan:
 			switch status {
-			case QRCodeStatusScanned:
-				fmt.Println("\n✓ QR code scanned! Waiting for confirmation...")
-			case QRCodeStatusExpired:
+			case "scaned":
+				fmt.Println("\n👀 已扫码，在微信继续操作...")
+			case "expired":
 				return &LoginResult{
 					Success: false,
 					Message: "QR code expired, please try again",
@@ -133,125 +126,23 @@ func (l *WeixinLogin) displayQRCode(qrURL string) error {
 	fmt.Println("\n📱 Weixin Login")
 	fmt.Println("═══════════════════════════════════════════")
 	fmt.Println()
-	fmt.Println("Scan the QR code below with Weixin:")
+	fmt.Println("使用微信扫描以下二维码完成登录：")
 	fmt.Println()
-	fmt.Println("  1. Open Weixin on your phone")
-	fmt.Println("  2. Go to 'Me' > 'Settings' > 'Devices'")
-	fmt.Println("  3. Tap 'Scan QR Code' or use scan from chat")
-	fmt.Println("  4. Scan the QR code image")
+	fmt.Println("  1. 打开手机微信")
+	fmt.Println("  2. 进入「我」>「设置」>「设备」")
+	fmt.Println("  3. 点击「扫一扫」扫描二维码")
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════")
 	fmt.Println()
 
-	// Download the QR code image from the URL
-	qrImage, err := downloadQRCodeImage(qrURL)
-	if err != nil {
-		// If we can't download the image, just show the URL
-		fmt.Println("QR Code URL:", qrURL)
-		fmt.Println()
-		fmt.Println("Please open the URL above in a browser to see the QR code.")
-		fmt.Println()
-		fmt.Println("Waiting for scan...")
-		return nil
-	}
-
-	// Display the QR code image in terminal
-	displayImageInTerminal(qrImage)
+	// Generate and display QR code in terminal
+	// qrURL is the URL to encode into the QR code
+	qrterminal.Generate(qrURL, qrterminal.L, os.Stdout)
 
 	fmt.Println()
-	fmt.Println("QR Code URL:", qrURL)
-	fmt.Println()
-	fmt.Println("Waiting for scan...")
+	fmt.Println("等待扫码...")
 
 	return nil
-}
-
-// downloadQRCodeImage downloads a QR code image from a URL
-func downloadQRCodeImage(url string) (image.Image, error) {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download QR code: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download QR code: status %d", resp.StatusCode)
-	}
-
-	img, _, err := image.Decode(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode QR code image: %w", err)
-	}
-
-	return img, nil
-}
-
-// displayImageInTerminal displays an image in the terminal using ASCII art
-func displayImageInTerminal(img image.Image) {
-	// Resize image to fit terminal (approximately 40 characters wide)
-	resized := imaging.Resize(img, 40, 0, imaging.Lanczos)
-	bounds := resized.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-
-	// ASCII characters for different brightness levels
-	chars := " .:-=+*#%@"
-
-	for y := 0; y < height; y++ {
-		var line string
-		for x := 0; x < width; x++ {
-			c := resized.At(x, y)
-			// Convert to grayscale
-			r, g, b, _ := c.RGBA()
-			gray := (r + g + b) / 3
-			// Map to character
-			charIndex := int(gray * uint32(len(chars)-1)) / 65535
-			if charIndex >= len(chars) {
-				charIndex = len(chars) - 1
-			}
-			line += string(chars[charIndex]) + string(chars[charIndex])
-		}
-		fmt.Println(line)
-	}
-}
-
-// displayQRCodeFromData encodes data directly into a QR code and displays it
-func displayQRCodeFromData(data string) {
-	qrterminal.Generate(data, qrterminal.L, os.Stdout)
-}
-
-// displayQRCodeAsBase64 downloads and converts to base64 for debugging
-func displayQRCodeAsBase64(url string) {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Get(url)
-	if err != nil {
-		fmt.Println("Failed to fetch QR code image")
-		return
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println("Failed to read QR code image")
-		return
-	}
-
-	encoded := base64.StdEncoding.EncodeToString(data)
-	fmt.Printf("QR Code Base64 (len=%d): %s...\n", len(encoded), encoded[:min(100, len(encoded))])
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // Logout logs out from Weixin
@@ -280,12 +171,12 @@ func RunWeixinLogin(accountID string, timeout time.Duration) error {
 	}
 
 	if result.Success {
-		fmt.Printf("\n✅ Login successful!\n")
-		fmt.Printf("   User ID: %s\n", result.UserID)
-		fmt.Printf("   Nickname: %s\n", result.NickName)
-		fmt.Printf("\nYou can now start the goclaw service with the weixin channel enabled.\n")
+		fmt.Printf("\n✅ 登录成功！\n")
+		fmt.Printf("   Bot ID:  %s\n", result.ILinkBotID)
+		fmt.Printf("   User ID: %s\n", result.ILinkUserID)
+		fmt.Printf("\n现在可以启动 goclaw 服务使用微信通道了。\n")
 	} else {
-		fmt.Printf("\n❌ Login failed: %s\n", result.Message)
+		fmt.Printf("\n❌ 登录失败: %s\n", result.Message)
 	}
 
 	return nil
@@ -302,7 +193,7 @@ func RunWeixinLogout(accountID string) error {
 		return fmt.Errorf("failed to logout: %w", err)
 	}
 
-	fmt.Printf("✅ Logged out from account: %s\n", accountID)
+	fmt.Printf("✅ 已登出账号: %s\n", accountID)
 	return nil
 }
 
@@ -319,25 +210,25 @@ func RunWeixinStatus(accountID string) error {
 	}
 
 	if tokenInfo == nil {
-		fmt.Printf("❌ Not logged in for account: %s\n", accountID)
-		fmt.Println("Run 'goclaw weixin login' to login.")
+		fmt.Printf("❌ 账号 %s 尚未登录\n", accountID)
+		fmt.Println("运行 'goclaw channels weixin login' 进行登录。")
 		return nil
 	}
 
-	fmt.Printf("Account: %s\n", accountID)
-	fmt.Printf("  User ID: %s\n", tokenInfo.UserID)
-	fmt.Printf("  Nickname: %s\n", tokenInfo.NickName)
+	fmt.Printf("账号: %s\n", accountID)
+	fmt.Printf("  Bot ID:  %s\n", tokenInfo.ILinkBotID)
+	fmt.Printf("  User ID: %s\n", tokenInfo.ILinkUserID)
 
 	if tokenInfo.ExpiresAt > 0 {
 		expiresAt := time.Unix(tokenInfo.ExpiresAt, 0)
 		if time.Now().After(expiresAt) {
-			fmt.Printf("  Status: ❌ Token expired at %s\n", expiresAt.Format(time.RFC3339))
+			fmt.Printf("  状态: ❌ Token 已过期 (%s)\n", expiresAt.Format(time.RFC3339))
 		} else {
 			remaining := time.Until(expiresAt).Round(time.Minute)
-			fmt.Printf("  Status: ✅ Logged in (expires in %s)\n", remaining)
+			fmt.Printf("  状态: ✅ 已登录 (剩余 %s)\n", remaining)
 		}
 	} else {
-		fmt.Printf("  Status: ✅ Logged in\n")
+		fmt.Printf("  状态: ✅ 已登录\n")
 	}
 
 	return nil
