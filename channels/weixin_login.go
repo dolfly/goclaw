@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mdp/qrterminal"
 	"github.com/smallnest/goclaw/internal/logger"
 	"go.uber.org/zap"
 )
@@ -132,21 +133,16 @@ func (l *WeixinLogin) displayQRCode(qrURL string) error {
 	fmt.Println("  3. Tap 'Scan QR Code' or use scan from chat")
 	fmt.Println("  4. Scan the QR code image")
 	fmt.Println()
-	fmt.Println("QR Code URL:", qrURL)
-	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════")
 	fmt.Println()
-	fmt.Println("Waiting for scan...")
 
-	// Try to display QR code in terminal if qrencode is available
-	// This is optional and may not work on all systems
-	_, err := os.Stat("/usr/bin/qrencode")
-	if err == nil {
-		fmt.Println("\nQR Code (scan with Weixin):")
-		fmt.Println()
-		// The QR code can be displayed using terminal-based QR encoding
-		// For simplicity, we just show the URL
-	}
+	// Generate and display QR code in terminal
+	qrterminal.Generate(qrURL, qrterminal.L, os.Stdout)
+
+	fmt.Println()
+	fmt.Println("QR Code URL:", qrURL)
+	fmt.Println()
+	fmt.Println("Waiting for scan...")
 
 	return nil
 }
