@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/smallnest/goclaw/channels"
 	"github.com/smallnest/goclaw/config"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +31,9 @@ func ChannelsCommand() *cobra.Command {
 
 	// Add status subcommand
 	cmd.AddCommand(channelsStatusCmd())
+
+	// Add weixin subcommand
+	cmd.AddCommand(weixinCmd())
 
 	return cmd
 }
@@ -123,6 +127,7 @@ func getAllKnownChannels() []ChannelInfo {
 		{Name: "teams", Enabled: false},
 		{Name: "googlechat", Enabled: false},
 		{Name: "infoflow", Enabled: false},
+		{Name: "weixin", Enabled: false},
 	}
 }
 
@@ -392,4 +397,83 @@ func checkGatewayOnline(timeout int) bool {
 	}
 
 	return false
+}
+
+// weixinCmd returns the weixin command
+func weixinCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "weixin",
+		Short: "Weixin channel management",
+		Long:  `Manage Weixin channel login and status.`,
+	}
+
+	// Add login subcommand
+	cmd.AddCommand(&cobra.Command{
+		Use:   "login [account-id]",
+		Short: "Login to Weixin via QR code",
+		Long:  `Login to Weixin by scanning a QR code. Account ID defaults to "default".`,
+		Args:  cobra.MaximumNArgs(1),
+		Run:   runWeixinLogin,
+	})
+
+	// Add logout subcommand
+	cmd.AddCommand(&cobra.Command{
+		Use:   "logout [account-id]",
+		Short: "Logout from Weixin",
+		Long:  `Logout from Weixin and remove stored credentials.`,
+		Args:  cobra.MaximumNArgs(1),
+		Run:   runWeixinLogout,
+	})
+
+	// Add status subcommand
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status [account-id]",
+		Short: "Check Weixin login status",
+		Long:  `Check the login status for Weixin account.`,
+		Args:  cobra.MaximumNArgs(1),
+		Run:   runWeixinStatus,
+	})
+
+	return cmd
+}
+
+// runWeixinLogin handles the weixin login command
+func runWeixinLogin(cmd *cobra.Command, args []string) {
+	accountID := "default"
+	if len(args) > 0 {
+		accountID = args[0]
+	}
+
+	fmt.Printf("Starting Weixin login for account: %s\n", accountID)
+
+	if err := channels.RunWeixinLogin(accountID, 5*time.Minute); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runWeixinLogout handles the weixin logout command
+func runWeixinLogout(cmd *cobra.Command, args []string) {
+	accountID := "default"
+	if len(args) > 0 {
+		accountID = args[0]
+	}
+
+	if err := channels.RunWeixinLogout(accountID); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runWeixinStatus handles the weixin status command
+func runWeixinStatus(cmd *cobra.Command, args []string) {
+	accountID := "default"
+	if len(args) > 0 {
+		accountID = args[0]
+	}
+
+	if err := channels.RunWeixinStatus(accountID); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }

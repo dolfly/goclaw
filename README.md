@@ -11,7 +11,7 @@ Go 语言版本的 OpenClaw - 一个功能强大的 AI Agent 框架。
 - 🛠️ **完整的工具系统**：FileSystem、Shell、Web、Browser，支持 Docker 沙箱与权限控制
 - 📚 **技能系统 (Skills)**：兼容 [OpenClaw](https://github.com/openclaw/openclaw) 和 [AgentSkills](https://agentskills.io) 规范，支持自动发现与环境准入控制 (Gating)
 - 💾 **持久化会话**：基于 JSONL 的会话存储，支持完整的工具调用链 (Tool Calls) 记录与恢复
-- 📢 **多渠道支持**：Telegram、WhatsApp、飞书 (Feishu)、QQ、企业微信 (WeWork)、钉钉 (DingTalk)、百度如流 (Infoflow)、Gotify、Slack、Discord、Google Chat、Microsoft Teams
+- 📢 **多渠道支持**：Telegram、WhatsApp、飞书 (Feishu)、QQ、企业微信 (WeWork)、钉钉 (DingTalk)、百度如流 (Infoflow)、Gotify、Slack、Discord、Google Chat、Microsoft Teams、微信 (Weixin)
 - 🔧 **灵活配置**：支持 YAML/JSON 配置，热加载，环境变量支持
 - 🎯 **多 LLM 提供商**：OpenAI (兼容接口)、Anthropic、OpenRouter，支持故障转移
 - 🌐 **WebSocket Gateway**：内置网关服务，支持实时通信
@@ -110,7 +110,8 @@ goclaw/
 │   ├── slack.go        # Slack 实现
 │   ├── discord.go      # Discord 实现
 │   ├── googlechat.go   # Google Chat 实现
-│   └── teams.go        # Microsoft Teams 实现
+│   ├── teams.go        # Microsoft Teams 实现
+│   └── weixin.go       # 微信实现
 ├── bus/                # 消息总线
 │   ├── events.go       # 消息事件
 │   └── queue.go        # 消息队列
@@ -420,7 +421,9 @@ goclaw 提供了丰富的命令行工具，主要命令包括：
 |-----|------|
 | `goclaw channels list` | 列出所有 channels |
 | `goclaw channels status` | 检查 channel 状态 |
-| `goclaw channels login --channel <type>` | 登录到 channel |
+| `goclaw channels weixin login [account-id]` | 微信扫码登录 |
+| `goclaw channels weixin logout [account-id]` | 微信登出 |
+| `goclaw channels weixin status [account-id]` | 查看微信登录状态 |
 
 ### Gateway 管理
 
@@ -655,6 +658,47 @@ A: 使用 `accounts` 字段配置多个账号实例：
   }
 }
 ```
+
+### Q: 如何配置微信 (Weixin) 通道？
+
+A: 微信通道基于腾讯 OpenClaw-weixin 插件协议，需要先扫码登录：
+
+```bash
+# 1. 登录微信账号
+./goclaw channels weixin login my-weixin
+
+# 2. 查看登录状态
+./goclaw channels weixin status my-weixin
+```
+
+配置示例：
+
+```json
+{
+  "channels": {
+    "weixin": {
+      "enabled": true,
+      "base_url": "https://ilinkai.weixin.qq.com",
+      "cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
+      "allowed_ids": [],
+      "accounts": {
+        "my-weixin": {
+          "enabled": true,
+          "name": "我的微信",
+          "allowed_ids": []
+        }
+      }
+    }
+  }
+}
+```
+
+微信通道特性：
+- 支持扫码登录获取 token
+- 支持文本、图片、语音、视频、文件消息
+- 支持消息收发和媒体文件传输
+- 使用 AES-128-ECB 加密保护媒体文件
+- Token 存储在 `~/.goclaw/weixin/accounts/<account_id>.json`
 
 ### Q: 记忆系统如何使用？
 

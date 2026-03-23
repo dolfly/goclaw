@@ -129,6 +129,7 @@ type ChannelsConfig struct {
 	Infoflow    InfoflowChannelConfig    `mapstructure:"infoflow" json:"infoflow"`
 	Gotify      GotifyChannelConfig      `mapstructure:"gotify" json:"gotify"`
 	Slack       SlackChannelConfig       `mapstructure:"slack" json:"slack"`
+	Weixin      WeixinChannelConfig      `mapstructure:"weixin" json:"weixin"`
 }
 
 // ChannelAccountConfig 通道账号配置（支持多账号）
@@ -275,6 +276,16 @@ type SlackChannelConfig struct {
 	SigningSecret string   `mapstructure:"signing_secret" json:"signing_secret"`     // Signing Secret for verification
 	AllowedIDs    []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置（新格式）
+	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
+}
+
+// WeixinChannelConfig 微信通道配置
+type WeixinChannelConfig struct {
+	Enabled    bool     `mapstructure:"enabled" json:"enabled"`
+	BaseURL    string   `mapstructure:"base_url" json:"base_url"`       // API base URL (默认: https://ilinkai.weixin.qq.com)
+	CDNBaseURL string   `mapstructure:"cdn_base_url" json:"cdn_base_url"` // CDN base URL (默认: https://novac2c.cdn.weixin.qq.com/c2c)
+	AllowedIDs []string `mapstructure:"allowed_ids" json:"allowed_ids"`
+	// 多账号配置
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
 }
 

@@ -765,6 +765,66 @@ func (m *Manager) SetupFromConfig(cfg *config.Config) error {
 		}
 	}
 
+	// Weixin 通道
+	if cfg.Channels.Weixin.Enabled {
+		if len(cfg.Channels.Weixin.Accounts) > 0 {
+			// 多账号配置
+			for accountID, accountCfg := range cfg.Channels.Weixin.Accounts {
+				if accountCfg.Enabled {
+					wxConfig := WeixinConfig{
+						BaseChannelConfig: BaseChannelConfig{
+							Enabled:    accountCfg.Enabled,
+							AccountID:  accountID,
+							Name:       accountCfg.Name,
+							AllowedIDs: accountCfg.AllowedIDs,
+						},
+						BaseURL:    cfg.Channels.Weixin.BaseURL,
+						CDNBaseURL: cfg.Channels.Weixin.CDNBaseURL,
+						Token:      accountCfg.Token,
+					}
+
+					channel, err := NewWeixinChannel(accountID, wxConfig, m.bus)
+					if err != nil {
+						logger.Error("Failed to create Weixin channel",
+							zap.String("account_id", accountID),
+							zap.Error(err))
+					} else {
+						channelName := buildChannelName("weixin", accountID)
+						if err := m.RegisterWithName(channel, channelName); err != nil {
+							logger.Error("Failed to register Weixin channel",
+								zap.String("account_id", accountID),
+								zap.Error(err))
+						} else {
+							logger.Info("Weixin channel registered",
+								zap.String("account_id", accountID),
+								zap.String("name", channelName))
+						}
+					}
+				}
+			}
+		} else {
+			// 单账号配置
+			wxConfig := WeixinConfig{
+				BaseChannelConfig: BaseChannelConfig{
+					Enabled:    cfg.Channels.Weixin.Enabled,
+					AccountID:  "default",
+					AllowedIDs: cfg.Channels.Weixin.AllowedIDs,
+				},
+				BaseURL:    cfg.Channels.Weixin.BaseURL,
+				CDNBaseURL: cfg.Channels.Weixin.CDNBaseURL,
+			}
+
+			channel, err := NewWeixinChannel("default", wxConfig, m.bus)
+			if err != nil {
+				logger.Error("Failed to create Weixin channel", zap.Error(err))
+			} else {
+				if err := m.Register(channel); err != nil {
+					logger.Error("Failed to register Weixin channel", zap.Error(err))
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
