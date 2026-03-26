@@ -24,8 +24,8 @@ func TestProviderResolver_ResolveFromModelsConfig(t *testing.T) {
 			Providers: map[string]config.ModelProviderConfig{
 				"openai": {
 					BaseURL: "https://api.openai.com/v1",
-					APIKey:   "TEST_API_KEY",
-					API:      config.ModelAPIOpenAICompletions,
+					APIKey:  "TEST_API_KEY",
+					API:     config.ModelAPIOpenAICompletions,
 					Models: []config.ModelDefinitionConfig{
 						{
 							ID:            "gpt-4o",
@@ -34,12 +34,6 @@ func TestProviderResolver_ResolveFromModelsConfig(t *testing.T) {
 							MaxTokens:     16384,
 							Reasoning:     false,
 							Input:         []string{"text", "image"},
-							Cost: &config.ModelCostConfig{
-								Input:      2.5,
-								Output:     10,
-								CacheRead:  1.25,
-								CacheWrite: 2.5,
-							},
 						},
 					},
 				},
@@ -73,10 +67,6 @@ func TestProviderResolver_ResolveFromModelsConfig(t *testing.T) {
 		t.Fatal("Expected model definition to be non-nil")
 	}
 
-	if resolved.Model.ContextWindow != 128000 {
-		t.Errorf("Expected context window 128000, got %d", resolved.Model.ContextWindow)
-	}
-
 	if resolved.GetMaxTokens(4096) != 16384 {
 		t.Errorf("Expected max tokens 16384, got %d", resolved.GetMaxTokens(4096))
 	}
@@ -102,7 +92,7 @@ func TestProviderResolver_ResolveWithEnvVarRef(t *testing.T) {
 			Providers: map[string]config.ModelProviderConfig{
 				"openai": {
 					BaseURL: "https://api.openai.com/v1",
-					APIKey:   "${MY_OPENAI_KEY}",
+					APIKey:  "${MY_OPENAI_KEY}",
 					Models: []config.ModelDefinitionConfig{
 						{ID: "gpt-4o", Name: "GPT-4o"},
 					},
@@ -122,41 +112,6 @@ func TestProviderResolver_ResolveWithEnvVarRef(t *testing.T) {
 	}
 }
 
-func TestProviderResolver_FallbackToLegacyConfig(t *testing.T) {
-	cfg := &config.Config{
-		Agents: config.AgentsConfig{
-			Defaults: config.AgentDefaults{
-				Model:     "gpt-4",
-				MaxTokens: 4096,
-			},
-		},
-		Providers: config.ProvidersConfig{
-			OpenAI: config.OpenAIProviderConfig{
-				APIKey:  "legacy-key",
-				BaseURL: "https://api.openai.com/v1",
-			},
-		},
-		Models: config.ModelsConfig{
-			Mode:      "merge",
-			Providers: map[string]config.ModelProviderConfig{}, // Empty providers
-		},
-	}
-
-	resolver := NewProviderResolver(cfg)
-	resolved, err := resolver.Resolve("gpt-4")
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-
-	if resolved.ProviderName != "openai" {
-		t.Errorf("Expected provider 'openai', got '%s'", resolved.ProviderName)
-	}
-
-	if resolved.APIKey != "legacy-key" {
-		t.Errorf("Expected API key 'legacy-key', got '%s'", resolved.APIKey)
-	}
-}
-
 func TestProviderResolver_AnthropicProvider(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -170,8 +125,8 @@ func TestProviderResolver_AnthropicProvider(t *testing.T) {
 			Providers: map[string]config.ModelProviderConfig{
 				"anthropic": {
 					BaseURL: "https://api.anthropic.com/v1",
-					APIKey:   "anthropic-key",
-					API:      config.ModelAPIAnthropicMessages,
+					APIKey:  "anthropic-key",
+					API:     config.ModelAPIAnthropicMessages,
 					Models: []config.ModelDefinitionConfig{
 						{
 							ID:            "claude-3-opus",
@@ -192,8 +147,24 @@ func TestProviderResolver_AnthropicProvider(t *testing.T) {
 		t.Fatalf("Resolve failed: %v", err)
 	}
 
+	if resolved.ProviderName != "anthropic" {
+		t.Errorf("Expected provider 'anthropic', got '%s'", resolved.ProviderName)
+	}
+
+	if resolved.ModelID != "claude-3-opus" {
+		t.Errorf("Expected model 'claude-3-opus', got '%s'", resolved.ModelID)
+	}
+
+	if resolved.APIKey != "anthropic-key" {
+		t.Errorf("Expected API key 'anthropic-key', got '%s'", resolved.APIKey)
+	}
+
 	if resolved.API != config.ModelAPIAnthropicMessages {
 		t.Errorf("Expected API type 'anthropic-messages', got '%s'", resolved.API)
+	}
+
+	if resolved.Model.MaxTokens != 4096 {
+		t.Errorf("Expected model.MaxTokens 4096, got %d", resolved.Model.MaxTokens)
 	}
 
 	if !resolved.IsReasoningModel() {
@@ -238,16 +209,41 @@ func TestProviderResolver_CustomProvider(t *testing.T) {
 		t.Errorf("Expected provider 'custom', got '%s'", resolved.ProviderName)
 	}
 
+	if resolved.ModelID != "model-v1" {
+		t.Errorf("Expected model 'model-v1', got '%s'", resolved.ModelID)
+	}
+
 	if resolved.BaseURL != "https://api.custom.com/v1" {
 		t.Errorf("Expected base URL 'https://api.custom.com/v1', got '%s'", resolved.BaseURL)
 	}
 }
 
+func TestProviderResolver_MissingProvider(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Model:     "openai:gpt-4",
+				MaxTokens: 4096,
+			},
+		},
+		Models: config.ModelsConfig{
+			Mode:      "merge",
+			Providers: map[string]config.ModelProviderConfig{},
+		},
+	}
+
+	resolver := NewProviderResolver(cfg)
+	_, err := resolver.Resolve("openai:gpt-4")
+	if err == nil {
+		t.Fatal("Expected error for missing provider, got nil")
+	}
+}
+
 func TestParseProviderModel(t *testing.T) {
 	tests := []struct {
-		input          string
-		expectedProv   string
-		expectedModel  string
+		input         string
+		expectedProv  string
+		expectedModel string
 	}{
 		{"openai:gpt-4o", "openai", "gpt-4o"},
 		{"anthropic:claude-3-opus", "anthropic", "claude-3-opus"},
@@ -268,10 +264,10 @@ func TestParseProviderModel(t *testing.T) {
 
 func TestResolvedProvider_GetMaxTokens(t *testing.T) {
 	tests := []struct {
-		name         string
-		resolved     *ResolvedProvider
-		defaultMax   int
-		expectedMax  int
+		name        string
+		resolved    *ResolvedProvider
+		defaultMax  int
+		expectedMax int
 	}{
 		{
 			name: "with model definition",
@@ -304,6 +300,45 @@ func TestResolvedProvider_GetMaxTokens(t *testing.T) {
 			result := tt.resolved.GetMaxTokens(tt.defaultMax)
 			if result != tt.expectedMax {
 				t.Errorf("GetMaxTokens(): expected %d, got %d", tt.expectedMax, result)
+			}
+		})
+	}
+}
+
+func TestResolvedProvider_GetContextWindow(t *testing.T) {
+	tests := []struct {
+		name                  string
+		resolved              *ResolvedProvider
+		expectedContextWindow int
+	}{
+		{
+			name: "with model definition",
+			resolved: &ResolvedProvider{
+				Model: &config.ModelDefinitionConfig{ContextWindow: 128000},
+			},
+			expectedContextWindow: 128000,
+		},
+		{
+			name: "without model definition",
+			resolved: &ResolvedProvider{
+				Model: nil,
+			},
+			expectedContextWindow: 0,
+		},
+		{
+			name: "model definition with zero context window",
+			resolved: &ResolvedProvider{
+				Model: &config.ModelDefinitionConfig{ContextWindow: 0},
+			},
+			expectedContextWindow: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.resolved.GetContextWindow()
+			if result != tt.expectedContextWindow {
+				t.Errorf("GetContextWindow(): expected %d, got %d", tt.expectedContextWindow, result)
 			}
 		})
 	}
