@@ -1001,15 +1001,15 @@ go build -o goclaw .
 {
   "agents": {
     "defaults": {
-      "model": "deepseek-chat",
+      "model": "qianfan:deepseek-v3.2",
       "max_iterations": 15,
       "temperature": 0.7
     }
   },
   "providers": {
-    "openai": {
+    "qianfan": {
       "api_key": "YOUR_API_KEY",
-      "base_url": "https://api.deepseek.com"
+      "base_url": "https://qianfan.baidubce.com/v2"
     }
   },
   "channels": {

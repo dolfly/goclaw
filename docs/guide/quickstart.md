@@ -67,17 +67,17 @@ GoClaw 按以下顺序查找配置文件：
 {
   "agents": {
     "defaults": {
-      "model": "gpt-4",
+      "model": "qianfan:deepseek-v3.2",
       "max_iterations": 15,
       "temperature": 0.7,
       "max_tokens": 4096
     }
   },
   "providers": {
-    "openai": {
-      "api_key": "YOUR_OPENAI_API_KEY_HERE",
-      "base_url": "https://api.openai.com/v1",
-      "timeout": 30
+    "qianfan": {
+      "api_key": "YOUR_QIANFAN_API_KEY_HERE",
+      "base_url": "https://qianfan.baidubce.com/v2",
+      "timeout": 600
     }
   },
   "channels": {
@@ -127,6 +127,18 @@ GoClaw 按以下顺序查找配置文件：
 
 GoClaw 支持多个 LLM 提供商：
 
+**Qianfan（百度千帆）:**
+```json
+{
+  "providers": {
+    "qianfan": {
+      "api_key": "bce-v3/...",
+      "base_url": "https://qianfan.baidubce.com/v2"
+    }
+  }
+}
+```
+
 **OpenAI:**
 ```json
 {
@@ -167,8 +179,9 @@ GoClaw 支持多个 LLM 提供商：
 
 通过修改 `model` 参数选择不同的模型：
 
-- `gpt-4` - OpenAI GPT-4
-- `gpt-3.5-turbo` - OpenAI GPT-3.5
+- `qianfan:deepseek-v3.2` - 百度千帆上的 DeepSeek 模型
+- `openai:gpt-4` - OpenAI GPT-4
+- `openai:gpt-3.5-turbo` - OpenAI GPT-3.5
 - `claude-3-opus-20240229` - Anthropic Claude 3 Opus
 - `openrouter:anthropic/claude-opus-4-5` - 通过 OpenRouter 使用指定模型
 
@@ -315,13 +328,13 @@ A: 修改配置文件中的 `model` 和 `providers` 部分：
 {
   "agents": {
     "defaults": {
-      "model": "claude-3-opus-20240229"
+      "model": "qianfan:deepseek-v3.2"
     }
   },
   "providers": {
-    "anthropic": {
-      "api_key": "sk-ant-...",
-      "base_url": "https://api.anthropic.com"
+    "qianfan": {
+      "api_key": "bce-v3/...",
+      "base_url": "https://qianfan.baidubce.com/v2"
     }
   }
 }

@@ -13,7 +13,7 @@ Go 语言版本的 OpenClaw - 一个功能强大的 AI Agent 框架。
 - 💾 **持久化会话**：基于 JSONL 的会话存储，支持完整的工具调用链 (Tool Calls) 记录与恢复
 - 📢 **多渠道支持**：Telegram、WhatsApp、飞书 (Feishu)、QQ、企业微信 (WeWork)、钉钉 (DingTalk)、百度如流 (Infoflow)、Gotify、Slack、Discord、Google Chat、Microsoft Teams、微信 (Weixin)
 - 🔧 **灵活配置**：支持 YAML/JSON 配置，热加载，环境变量支持
-- 🎯 **多 LLM 提供商**：OpenAI (兼容接口)、Anthropic、OpenRouter，支持故障转移
+- 🎯 **多 LLM 提供商**：OpenAI、Qianfan（百度千帆，OpenAI-compatible）、Anthropic、OpenRouter，支持故障转移
 - 🌐 **WebSocket Gateway**：内置网关服务，支持实时通信
 - ⏰ **Cron 调度**：内置定时任务调度器
 - 🖥️ **Browser 自动化**：基于 Chrome DevTools Protocol 的浏览器控制
@@ -232,9 +232,9 @@ goclaw 按以下顺序查找配置文件（找到第一个即使用）：
     }
   },
   "providers": {
-    "openai": {
-      "api_key": "YOUR_OPENAI_API_KEY_HERE",
-      "base_url": "https://api.deepseek.com",
+    "qianfan": {
+      "api_key": "YOUR_QIANFAN_API_KEY_HERE",
+      "base_url": "https://qianfan.baidubce.com/v2",
       "timeout": 600
     },
     "anthropic": {
@@ -549,9 +549,9 @@ goclaw 支持以下环境变量（前缀 `GOSKILLS_`）：
 ### Q: 如何切换不同的 LLM 提供商？
 
 A: 修改配置文件中的 `model` 字段和 `providers` 配置：
-- `gpt-4` - OpenAI
+- `qianfan:deepseek-v3.2` - Qianfan（百度千帆）
+- `openai:gpt-4` - OpenAI
 - `claude-3-5-sonnet-20241022` - Anthropic
-- `deepseek-chat` - DeepSeek (通过 OpenAI 兼容接口)
 - `openrouter:anthropic/claude-opus-4-5` - OpenRouter
 
 ### Q: 工具调用失败怎么办？

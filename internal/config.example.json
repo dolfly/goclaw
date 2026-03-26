@@ -107,9 +107,14 @@
       "timeout": 600,
       "max_retries": 3
     },
+    "qianfan": {
+      "api_key": "YOUR_QIANFAN_API_KEY_HERE",
+      "base_url": "https://qianfan.baidubce.com/v2",
+      "timeout": 600
+    },
     "openai": {
-      "api_key": "YOUR_OPENAI_API_KEY_HERE",
-      "base_url": "https://api.deepseek.com",
+      "api_key": "",
+      "base_url": "",
       "timeout": 600
     },
     "anthropic": {
