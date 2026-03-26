@@ -1,4 +1,4 @@
-# GoClaw CLI Cheatsheet
+# GoClaw CLI 命令速查表
 
 GoClaw 是一个 Go 语言实现的 AI Agent 框架，提供完整的命令行工具来管理 agents、channels、gateway 和系统功能。
 
@@ -38,6 +38,7 @@ goclaw agent --message "你好"
 
 # 配置管理
 goclaw config show
+goclaw config validate
 ```
 
 ---
@@ -122,6 +123,19 @@ goclaw channels logs --channel telegram --lines 100
 
 # Channel 状态探测
 goclaw channels status --probe
+```
+
+### 微信通道管理
+
+```bash
+# 微信扫码登录
+goclaw channels weixin login [account-id]
+
+# 查看微信登录状态
+goclaw channels weixin status [account-id]
+
+# 微信登出
+goclaw channels weixin logout [account-id]
 ```
 
 ---
@@ -457,7 +471,7 @@ goclaw sessions list --store /path/to/sessions
 # 列出所有技能
 goclaw skills list
 
-# 只列出已就绪的技能
+# 只列出已就绪的技能（无缺失依赖）
 goclaw skills list --eligible
 
 # 详细输出
@@ -469,17 +483,8 @@ goclaw skills info <skill-name>
 # 检查技能状态
 goclaw skills check
 
-# 安装技能
-goclaw skills install <skill-url>
-
-# 安装本地技能
-goclaw skills install /path/to/skill
-
-# 更新技能
-goclaw skills update <skill-name>
-
-# 卸载技能
-goclaw skills uninstall <skill-name>
+# 安装技能依赖
+goclaw skills install-deps <skill-name>
 
 # 验证技能依赖
 goclaw skills validate <skill-name>
@@ -607,13 +612,23 @@ export OPENAI_API_KEY="your-key"
 # 设置 Gateway URL
 export GOCRAW_GATEWAY_URL="ws://localhost:28789"
 export GOCRAW_GATEWAY_TOKEN="your-token"
+
+# 设置日志级别
+export GOCRAW_LOG_LEVEL="debug"
+
+# 技能自动安装依赖
+export GOCRAW_SKILL_AUTO_INSTALL="true"
+
+# Node.js 包管理器选择
+export GOCRAW_NODE_MANAGER="pnpm"
 ```
 
 ### 配置文件
 
 ```bash
 # 默认配置位置
-~/.goclaw/config.yaml
+~/.goclaw/config.json  # 用户全局目录（最高优先级）
+./config.json          # 当前目录
 
 # 工作区
 ~/.goclaw/workspace/
@@ -623,6 +638,10 @@ export GOCRAW_GATEWAY_TOKEN="your-token"
 
 # 日志目录
 ~/.goclaw/logs/
+
+# 技能目录
+~/.goclaw/skills/     # 用户全局技能
+./skills/             # 当前目录技能（最高优先级）
 ```
 
 ### 组合命令
@@ -662,13 +681,17 @@ goclaw channels logs --channel all --lines 200
 goclaw skills check
 
 # 验证配置
-goclay doctor
+goclaw config validate
+
+# 查看详细日志
+GOCRAW_LOG_LEVEL=debug goclaw start
 ```
 
 ---
 
 ## 参考资源
 
-- [项目文档](https://docs.openclaw.ai)
-- [GitHub 仓库](https://github.com/smallnest/goclaw)
+- [项目文档](https://github.com/smallnest/goclaw)
 - [问题反馈](https://github.com/smallnest/goclaw/issues)
+- [OpenClaw 文档](https://docs.openclaw.ai)
+- [AgentSkills 规范](https://agentskills.io)

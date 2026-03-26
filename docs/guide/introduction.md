@@ -1,584 +1,486 @@
-# GoClaw 架构介绍
+# 我用 Go 重写了一个 AI Agent 框架：这就是 GoClaw
 
-> Go 语言的个人 AI 助手 • OpenClaw 设计理念的实现
+> 如果 OpenClaw 代表了一种 Agent 设计思路，那么 GoClaw 想回答的问题是：这套东西能不能用 Go 做得更轻、更稳、更适合长期运行？
 
----
-
-## 概述
-
-GoClaw 是一个用 Go 语言编写的个人 AI 助手，灵感来自 OpenClaw（原 Clawdbot/Moltbot）。它运行在本地服务器上，通过 WebSocket/HTTP 暴露服务，支持多种消息channel（Telegram、WhatsApp、飞书、QQ、Slack 等）接入。
-
-![](goclaw.png)
-
-### 核心定位
-
-| 特性 | 说明 |
-|------|------|
-| **语言** | Go（单一静态链接二进制） |
-| **架构** | CLI 应用 + 网关服务器 |
-| **部署** | 本地进程，暴露 WebSocket/HTTP |
-| **扩展性** | 技能系统 (OpenClaw 兼容) |
-| **可靠性** | 串行默认，故障转移，反思机制 |
+项目地址：[https://github.com/smallnest/goclaw](https://github.com/smallnest/goclaw)
 
 ---
 
-## 核心架构
+## 这是什么？
 
-### 系统全景图
+这两年，大家做 AI Agent，很多时候默认会选 Python 或 Node.js。原因很现实：生态成熟、轮子够多、上手也快。
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                      GoClaw 系统架构                                          │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐   │
-│   │ 输入Channel  │── →│  网关服务器  │───→│  Agent Loop │───→│  LLM/工具    │   │
-│   └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘   │
-│        │                  │                   │                  │           │
-│        │                  │                   │                  │           │
-│        v                  v                   v                  v           │
-│   Telegram/WhatsApp    MessageBus        SessionManager       Providers      │
-│   飞书/QQ/Slack         串行队列            JSONL存储            OpenAI/AI...   │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+但如果你真的想把一个 Agent 长期跑起来，问题很快就会从“怎么调模型”变成“怎么部署、怎么运维、怎么保证它别轻易挂掉”。
 
-### 消息处理流程
+也正因为这样，我一直在想：如果把 OpenClaw 这套已经被验证过的设计思路，用 Go 重新实现，会变成什么样？
 
-```
-用户消息 → Channel适配器 → 网关服务器 → Agent Loop → LLM 调用 → 工具执行 → 响应返回
-```
+GoClaw 就是在这个背景下做出来的。
+
+它是一个用 Go 编写的 AI Agent 框架，灵感来自 OpenClaw。这里强调“框架”，是因为它不只是一个聊天机器人，而是一套完整的运行体系：能接入消息平台、执行任务、调用工具，也能继续扩展新能力。
+
+如果把 OpenClaw 看作一套成熟的 Agent 设计，那么 GoClaw 更像是一次“用 Go 把它工程化重做”的尝试。这样做的好处很直接：单一二进制部署，编译后就是一个可执行文件，扔到服务器上就能跑；模块边界更清晰，消息通道、工具系统、技能系统、记忆系统彼此解耦；运行时也更稳，重试、故障转移、熔断器这些可靠性机制可以直接内建进去。
+
+它能接哪些平台？Telegram、WhatsApp、飞书、钉钉、微信、企业微信、Slack、Discord、Google Chat、Microsoft Teams、百度如流等常见 IM 与协作平台都已经覆盖。你也可以通过 WebSocket Gateway 对接自己的系统，或者直接使用内置的 Dashboard。
+
+如果只用一句话概括 GoClaw，可以这么说：它想做的不是“再造一个聊天机器人”，而是提供一套适合长期运行、方便扩展、并且足够稳的 Go 版 Agent 基础设施。
+
+换句话说，GoClaw 想解决的不是“模型能不能更聪明”，而是“一个 Agent 系统能不能真正跑起来、跑得久、出了问题还能查”。
+
+![Dashboard 示例](../dashboard.png)
 
 ---
 
-## Agent Loop 执行引擎
+## 核心架构：一条看似简单，其实很难跑稳的链路
 
-Agent Loop 是 GoClaw 的大脑，负责思考、规划和执行。它受到 OpenClaw 的 **PI Agent** 架构启发。
+![架构图](./architecture.png)
 
-### PI Agent 理念
+从外面看，GoClaw 的工作流并不复杂：消息进来，Agent 处理，结果再发出去。
 
-**PI** = 极简编码代理（Mario Zechner 创建）
+真正难的地方不在这条主链路本身，而在主链路背后那一堆容易被忽略的问题：状态怎么管理？工具调用失败了怎么办？用户中途插话怎么打断？上下文太长了怎么恢复？账号限流了怎么切备用？
 
-> "LLMs 本身就擅长编写和运行代码，不需要过多的包装"
+这些问题不解决，Agent 看起来能跑，实际上并不适合长期运行。
 
-| 特性 | 传统 Agent (ReAct) | PI Agent | GoClaw |
-|------|---------------------|----------|--------|
-| 循环模式 | Observe → Think → Act → Plan | Stream → Execute → Continue | Stream → Execute → Reflect → Continue |
-| 系统提示词 | 数千 token | < 1K token | ~1.5K token |
-| 工具数量 | 许多专用工具 | 4 个核心工具 | 核心工具 + 可扩展 |
-| 最大步数 | 固定上限 (20) | 无限制 | 15 + 反思判断 |
-| 计划模式 | 内置计划阶段 | 文件可见计划 | 可选反思机制 |
+### 系统怎么运转？
 
-### 执行流程图
+用户消息先到 Channel 适配器。适配器负责把不同平台的格式转成统一的内部消息格式，然后扔到 MessageBus。Agent 从 Bus 拿消息，找到或创建对应的 Session，调用 Orchestrator 执行。
+
+Orchestrator 是核心协调器，它管理 LLM 调用、工具执行、状态维护。下面有 AgentState 管消息历史和队列，ContextBuilder 组装系统提示词，RetryManager 处理重试和故障转移。工具系统通过 ToolRegistry 注册，技能系统通过 SkillsLoader 加载。
+
+Provider 层负责对接 LLM。支持 OpenAI、Anthropic、OpenRouter 等提供商，还支持配置轮换和故障转移——主账号挂了自动切备用账号。
+
+### 双循环机制：为什么很多 Agent 看起来能跑，其实一复杂就散？
+
+GoClaw 用双循环处理消息。原因很简单：很多真实任务都不是“一次 LLM 调用”就能结束的。
+
+很多 Demo 能跑，是因为它只处理“一问一答”。但只要任务一复杂，比如要查信息、调用工具、等待结果、接着继续判断，你就会发现单轮执行很快不够用了。
+
+外层循环处理 FollowUp 消息。所谓 FollowUp，可以理解为“这件事做完以后，下一步还要继续做什么”。比如用户说“帮我查下明天天气，如果下雨就提醒我带伞”，Agent 查完天气后，会继续判断是否需要发提醒，这就是一个典型的 FollowUp 任务链。
+
+内层循环处理工具调用和 Steering。工具调用比较直观: LLM 先决定“要读文件”或“要执行命令”，系统把结果拿回来，再继续下一轮。Steering 则是中断机制。用户在 Agent 执行过程中突然插一句“停下，别干了”，这条消息应该优先级更高，能够立即打断当前工具链，转去处理紧急指令。
 
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│                       GoClaw Agent Loop                              │
-├───────────────────────────────────────────────────────────────────┤
-│                                                                    │
-│  ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐   │
-│  │ 接收消息   │────→│ 构建上下文 │────→│  LLM 调用 │────→│ 执行工具   │   │
-│  └──────────┘     └──────────┘     └──────────┘     └──────────┘   │
-│                                                        │            │
-│                                                        v            │
-│                                            ┌─────────────────┐      │
-│                                            │   工具结果返回   │      │
-│                                            └─────────────────┘      │
-│                                                        │            │
-│                                                        v            │
-│                                            ┌─────────────────┐      │
-│                                            │   反思机制判断   │      │
-│                                            │   (可选)         │      │
-│                                            └─────────────────┘      │
-│                                                        │            │
-│                                    ┌─────────────┴────────────┐     │
-│                                    v                           v     │
-│                             ┌─────────────┐           ┌─────────────┐ │
-│                             │  继续迭代   │           │  返回响应   │ │
-│                             └─────────────┘           └─────────────┘ │
-│                                                                    │
-└───────────────────────────────────────────────────────────────────┘
+用户消息 → Channel 适配器 → MessageBus → Agent.handleInboundMessage()
+                                        │
+                                        ▼
+                               Session 获取/创建
+                                        │
+                                        ▼
+                               Orchestrator.Run()
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    │                                       │
+                    ▼                                       ▼
+            ┌───────────────────┐                  ┌───────────────┐
+            │    外层循环        │                  │ 检查 FollowUp  │
+            │ (FollowUp 处理)    │◄──────────────── │   消息队列     │
+            └─────────┬─────────┘                  └───────────────┘
+                      │                                   ▲
+                      ▼                                   │
+            ┌───────────────────┐                         │
+            │    内层循环        │                         │
+            │ (工具调用处理)      │                         │
+            │                   │                         │
+            │  LLM调用 → 工具执行 │                         │
+            │         ↓         │                         │
+            │  检查 Steering     │─── 有 ──► 中断 ──────────┤
+            │         ↓ 无      │                          │
+            │  继续工具链         │                         │
+            └─────────┬─────────┘                         │
+                      │                                   │
+                      ▼                                   │
+            内层循环结束 ───────────────────────────────────┘
+                                        │
+                                        ▼
+            结果处理 → Session 更新 → Bus 发布 → Channel 发送
 ```
 
-### 核心组件
+这和 OpenClaw 的设计有什么不同？两者都采用双循环，但恢复逻辑放置的位置不同。OpenClaw 更倾向于把重试、故障转移和上下文压缩放在外层；GoClaw 则把这些恢复逻辑更多收敛到内层执行路径里，外层循环主要负责 FollowUp。前者更容易把整体流程看清楚，后者则更利于把失败恢复和工具执行放在同一个语义闭环里。
 
-#### 1. 上下文构建器 (ContextBuilder)
+---
 
-**文件**: `agent/context.go`
+## 核心组件：真正让系统转起来的，不只是模型
+
+### Agent 和 Orchestrator
+
+Agent 是主代理类，负责管理消息处理和生命周期。它更像一个总入口，不直接执行业务细节，而是把请求分发给各个子系统。Orchestrator 则更接近“执行中枢”，负责 LLM 调用循环、工具执行和中断处理。
+
+如果把 GoClaw 类比成一个小型操作系统，那么 Agent 像入口层，Orchestrator 像调度层，AgentState 则像运行时状态。
 
 ```go
-type ContextBuilder struct {
-    memory       *MemoryStore
-    workspace    string
-    agentID      string
-    defaultModel string
-    provider     string
+// Agent 的核心字段（省略锁、订阅等辅助字段）
+type Agent struct {
+    orchestrator       *Orchestrator
+    bus                *bus.MessageBus
+    provider           providers.Provider
+    sessionMgr         *session.Manager
+    tools              *ToolRegistry
+    context            *ContextBuilder
+    workspace          string
+    skillsLoader       *SkillsLoader
+    helper             *AgentHelper
+    maxHistoryMessages int
+    state              *AgentState
+}
+
+// Orchestrator 的核心字段
+type Orchestrator struct {
+    config     *LoopConfig
+    state      *AgentState // 作为模板的初始状态
+    eventChan  chan *Event
+    cancelFunc context.CancelFunc
 }
 ```
 
-**职责**:
-- 动态组装系统提示词
-- 注入可用工具定义
-- 添加会话历史（从 JSONL）
-- 整合相关记忆
-- 上下文窗口保护与压缩
+### AgentState：为什么很多 Agent 一复杂就“失忆”？
 
-**上下文压缩策略**:
+AgentState 管理整个执行过程中的状态。除了消息历史和系统提示词，它还维护流式输出状态、待处理工具、Steering 队列和 FollowUp 队列，是 Orchestrator 每轮执行都会反复读写的核心对象。
+
+很多 Agent 的不稳定，本质上不是模型不够强，而是状态管理太松散。状态一散，恢复、续跑、中断、调试都会变得很痛苦。
+
 ```go
-// agent/loop.go:571
-func (l *Loop) compressSession(sess *session.Session) {
-    // 保留最近 10 轮对话
-    // 保留所有系统消息
-    // 丢弃早期历史，保留关键上下文
+type AgentState struct {
+    SystemPrompt  string
+    Model         string
+    Provider      string
+    ThinkingLevel string
+    Tools         []Tool
+    Messages      []AgentMessage
+    IsStreaming   bool
+    StreamMessage *AgentMessage
+    PendingTools  map[string]bool
+    Error         error
+
+    SteeringQueue []AgentMessage
+    SteeringMode  MessageQueueMode
+    FollowUpQueue []AgentMessage
+    FollowUpMode  MessageQueueMode
+
+    SessionKey   string
+    LoadedSkills []string
 }
 ```
 
-#### 2. 工具注册表 (Tools Registry)
+### Steering 和 FollowUp：一个负责打断，一个负责继续
 
-**文件**: `agent/tools/registry.go`
+Steering 是中断式消息。用户在 Agent 执行过程中说"停"，这条消息会立即插入到当前对话，打断正在执行的工具链。适用于紧急停止、修改指令等场景。
 
-**核心工具集（对应 PI 的四个工具）**:
-
-| GoClaw 工具 | 功能 | PI 对应 |
-|------------|------|--------|
-| `read_file` | 读取文件（行号、glob） | `read` |
-| `write_file` | 创建/覆盖文件 | `write` |
-| `edit_file` | 精确字符串替换 | `edit` |
-| `run_shell` | Shell 命令执行 | `bash` |
-
-**GoClaw 扩展工具**:
-- `browser_*` - 浏览器操作 (Chrome DevTools Protocol)
-- `smart_search` - 混合搜索 (向量 + FTS5)
-- `spawn` - 子代理管理
-- `message` - 消息发送
-
-**工具执行与重试**:
 ```go
-// agent/loop.go:526
-func (l *Loop) executeToolWithRetry(ctx context.Context, toolName string, params map[string]interface{}) (string, error) {
-    // 网络错误自动重试
-    // 错误分类与降级建议
-    // 结构化错误返回给 LLM 自我校正
-}
+agent.Steer(AgentMessage{
+    Role: RoleUser,
+    Content: []ContentBlock{TextContent{Text: "紧急停止"}},
+})
 ```
 
-#### 3. 反思器 (Reflector)
-
-**文件**: `agent/reflection.go`
-
-解决传统 Agent "何时停止" 的难题：
+FollowUp 是后续消息。Agent 完成当前任务后，自动处理这些排队的消息。适用于任务链、异步回调、多步骤流程。
 
 ```go
-type Reflector struct {
-    config   *ReflectionConfig
-    provider providers.Provider
-    workspace string
-}
-
-type TaskReflection struct {
-    Status         TaskStatus  // "completed", "in_progress", "failed", "blocked"
-    Confidence     float64     // 0.0 - 1.0
-    CompletedSteps []string    // 已完成步骤
-    RemainingSteps []string    // 剩余步骤
-    Reasoning      string      // 思考过程
-    NextAction     string      // 下一步行动
-}
+agent.FollowUp(AgentMessage{
+    Role: RoleUser,
+    Content: []ContentBlock{TextContent{Text: "继续下一个任务"}},
+})
 ```
 
-**反思流程**:
-```go
-// agent/loop.go:487
-reflection, reflectErr := l.reflector.Reflect(ctx, userRequest, reflectionHistory)
+### ContextBuilder：系统提示词不是写死的
 
-if l.reflector.ShouldContinueIteration(reflection, iteration, l.maxIteration) {
-    continuePrompt = l.reflector.GenerateContinuePrompt(reflection)
-    continue
-}
-```
+ContextBuilder 负责动态组装系统提示词。它不是把一大段固定 Prompt 硬塞给模型，而是根据运行场景选择不同的上下文深度。`full` 模式用于主 Agent，包含身份、工具、技能、CLI 参考等完整信息；`minimal` 模式主要给子 Agent 使用；`none` 模式则只保留最基本的身份信息。
 
-**与传统 max-iterations 的区别**:
-- 传统：固定步数后强制停止
-- 反思：动态判断任务状态，智能决定是否继续
+这里还涉及到上下文窗口的压缩问题。我在实现GoClaw犯的一个错误就是压缩时粗暴的使用消息窗口的机制，最多保留最新的n条记录，历史记录采用摘要的方式放在上下文里，但是因为消息之间是有关联的我，尤其是tool调用的时候，我先前错误的粗暴的实现导致压缩后对用的消息对应不上，导致后续的回复出现错误。
 
-#### 4. 错误分类器 (ErrorClassifier)
+### 重试机制：真正的工程问题，从失败那一刻才开始
 
-**文件**: `agent/error_classifier.go`
+在 Agent 系统里，重试如果只是简单地“再来一次”，往往意义不大。GoClaw 的重试逻辑同时带着恢复策略：遇到上下文溢出，可以压缩历史消息；遇到账号问题，可以轮换到备用账号；遇到临时故障，可以指数退避后再试。
+
+这也是 GoClaw 和很多“能跑起来的 Demo”之间的差别：前者把失败当成设计对象，后者通常只把成功路径写通。
 
 ```go
-type ErrorClassifier struct {
-    authPatterns      []string
-    rateLimitPatterns []string
-    timeoutPatterns   []string
-    billingPatterns   []string
-}
-```
-
-**错误分类**:
-- `auth` - 认证错误（需要故障转移）
-- `rate_limit` - 限流错误（需要冷却）
-- `timeout` - 超时错误（可重试）
-- `billing` - 计费错误（需要故障转移）
-- `tool` - 工具错误（返回给 LLM）
-
-**智能降级策略**:
-```go
-// agent/loop.go:628
-func (l *Loop) formatToolError(toolName string, params map[string]interface{}, err error) string {
-    // 根据工具类型和错误提供具体建议
-    // 例如：write_file 失败 → 建议输出到控制台
-    // 例如：browser 失败 → 建议使用 web_fetch
+type RetryConfig struct {
+    MaxAttempts        int           // 最大重试次数
+    BaseDelay          time.Duration // 基础延迟
+    MaxDelay           time.Duration // 最大延迟
+    ProfileRotation    bool          // 配置轮换
+    ContextCompression bool          // 上下文压缩
 }
 ```
 
 ---
 
-## GoClaw vs OpenClaw PI Agent
+## 工具系统：光会说不够，Agent 还得真的能做事
 
-### 架构对比
+工具是 Agent 的“手脚”。LLM 负责判断和生成计划，真正去读文件、跑命令、抓网页、发消息，靠的是工具层。GoClaw 选择的是一套偏通用、可组合的核心工具，而不是针对每个场景都去发明一个专用工具。
 
-**OpenClaw PI (TypeScript) - 极简循环**:
-```typescript
-while (true) {
-  const response = await streamCompletion(model, context);
-  if (!response.toolCalls?.length) break;
+这种设计背后的取舍很明确：工具尽量少，但每个工具都足够通用。这样系统核心不会迅速膨胀，复杂场景则交给技能系统去补。
 
-  for (const call of response.toolCalls) {
-    const result = await executeToolCall(call, context);
-    context.messages.push(result);
-  }
-}
-```
+常见的工具大致分几类：文件操作有 `read_file`、`write_file`、`list_files`；命令执行有 `run_shell` 和 `process`；网络相关有基于 Chrome DevTools Protocol 的 `browser_*`、`web_search`、`web_fetch`；另外还有 `use_skill`、`message`、`cron`、`session_status` 这些偏系统能力的工具。
 
-**GoClaw (Go) - 增强循环**:
-```go
-for iteration < l.maxIteration {
-    response, err := l.provider.Chat(ctx, messages, tools)
-
-    if len(response.ToolCalls) > 0 {
-        for _, tc := range response.ToolCalls {
-            result, err := l.executeToolWithRetry(ctx, tc.Name, tc.Params)
-        }
-        continue
-    }
-
-    if response.Content == "" && l.reflector != nil {
-        reflection := l.reflector.Reflect(ctx, userRequest, history)
-        if !l.reflector.ShouldContinueIteration(reflection, iteration, l.maxIteration) {
-            break
-        }
-        continue
-    }
-
-    break
-}
-```
-
-### 会话存储对比
-
-| 特性 | OpenClaw PI | GoClaw |
-|------|-------------|--------|
-| 格式 | Append-Only DAG | Linear JSONL |
-| 跨模型 | 支持（pi-ai 抽象） | 支持（Provider 抽象） |
-| 持久化 | 单一文件 | JSONL（每行一条） |
-| 分支 | 移动叶指针（高效） | 创建新会话（简单） |
-
-### 扩展系统对比
-
-**OpenClaw PI - TypeScript Hooks**:
-```typescript
-hooks: {
-  onSessionStart: async (session) => { ... },
-  onBeforeTurn: async (session) => { ... },
-  onToolCall: async (tool, params) => { ... },
-  // 20+ 生命周期钩子
-}
-```
-
-**GoClaw - Skills System**:
-```go
-type Skill struct {
-    Name        string
-    Description string
-    Triggers    []string    // 触发关键词
-    Content     string      // Markdown 指令
-    Requires    []string    // 环境依赖 (Gating)
-}
-```
-
-### 设计哲学对比
-
-| 理念 | OpenClaw PI | GoClaw |
-|------|-------------|--------|
-| 核心原则 | "LLMs 知道如何编码" | "可靠性优于复杂性" |
-| 系统提示词 | 极简 (< 1K) | 适度 (~1.5K) |
-| 工具哲学 | 少即是好 (4 个) | 核心工具 + 可扩展 |
-| 错误处理 | 返回给模型自我校正 | 分类 + 重试 + 降级 |
-| 终止条件 | 自然停止 | 反思机制 + 最大迭代 |
-| 可观测性 | 完全透明（计划文件） | 结构化日志 + 会话持久化 |
-
-### GoClaw 独特创新
-
-1. **反思机制** - 解决 Agent "何时停止" 难题
-2. **错误分类与重试** - 三层容错（工具级、迭代级、提供商级）
-3. **混合搜索** - 向量 + FTS5 双重检索
-4. **技能准入 (Gating)** - 根据环境自动加载技能
-5. **上下文压缩** - 智能保留关键历史
-
----
-
-## 网关服务器
-
-**文件**: `gateway/server.go`
-
-网关服务器是 GoClaw 的心脏，负责任务/会话协调：
+工具接口本身并不复杂：声明名称、描述、参数 Schema，再实现执行逻辑即可。为了支持 UI 展示和流式回传，接口里还额外定义了 `Label()` 和带 `onUpdate` 回调的 `Execute()`。
 
 ```go
-type Server struct {
-    config        *config.GatewayConfig
-    wsConfig      *WebSocketConfig
-    bus           *bus.MessageBus
-    channelMgr    *channels.Manager
-    sessionMgr    *session.Manager
-    connections   map[string]*Connection
-}
-```
-
-**核心功能**:
-- 处理多个重叠请求
-- 基于队列的消息总线（串行默认）
-- WebSocket 连接支持
-- Webhook 回调处理
-- HTTP 健康检查端点
-
----
-
-## 内存系统
-
-### 双重记忆架构
-
-#### 会话记录 (JSONL)
-- 每行一个 JSON 对象
-- 包含用户消息、工具调用、结果、响应
-- 会话基础的持久化记忆
-
-#### 记忆文件 (Markdown)
-- `MEMORY.md` 或 `memory/` 文件夹
-- 由代理使用标准文件写入工具生成
-- 没有特殊的记忆写入 API
-
-### 混合搜索
-
-| 类型 | 用途 | 实现 |
-|------|------|------|
-| **向量搜索** | 语义相似性 | SQLite + 嵌入 |
-| **关键词搜索 (FTS5)** | 精确短语匹配 | SQLite 扩展 |
-
-**文件**: `memory/search.go`
-
-```go
-type MemoryManager struct {
-    store         Store
-    provider      EmbeddingProvider
-    cache         map[string]*VectorEmbedding
+type Tool interface {
+    Name() string
+    Description() string
+    Parameters() map[string]any
+    Label() string
+    Execute(ctx context.Context, params map[string]any, onUpdate func(ToolResult)) (ToolResult, error)
 }
 ```
 
 ---
 
-## 计算机使用
+## 技能系统：为什么我更想写 Markdown，而不是继续写插件
 
-### Shell 执行
+技能系统是 GoClaw 一个很有代表性的设计。**Skill 更接近“知识模块”，而不是传统意义上的代码插件。**
 
-| 模式 | 说明 |
-|------|------|
-| **沙箱**（默认） | Docker 容器中运行 |
-| **直接主机** | 直接在主机上运行 |
-| **远程设备** | 在远程设备上执行 |
+为什么这么设计？因为写代码插件的门槛高，写 Markdown 文档的门槛低得多。技能通过 Prompt Injection 实现：系统读取 `SKILL.md`，提取元数据和正文，再把它注入系统提示词里，LLM 就知道在什么场景下应该怎么做。
 
-### 文件系统工具
+这件事的价值不只是“更方便扩展”，更重要的是它把扩展能力从“写代码的人”手里，部分转移到了“懂业务的人”手里。
 
-- `read_file` - 读取文件
-- `write_file` - 写入文件
-- `edit_file` - 编辑文件
-- `list_files` - 列出目录
+一个技能文件长什么样？开头是 YAML 格式的元数据，定义名称、描述、依赖等。后面是 Markdown 格式的内容，告诉 LLM 在什么情况下该做什么。
 
-### 浏览器工具 (Chrome DevTools Protocol)
+```yaml
+---
+name: weather
+description: Get current weather and forecasts via CLI.
+metadata:
+  openclaw:
+    emoji: "🌤️"
+    requires:
+      bins: ["curl"]
+      pythonPkgs: ["requests"]
+---
 
-- `browser_navigate` - 导航到 URL
-- `browser_screenshot` - 截取页面截图
-- `browser_execute_script` - 执行 JavaScript
-- `browser_click` - 点击元素
-- `browser_fill_input` - 填写输入框
-- `browser_get_text` - 获取页面文本
+# Weather Forecast
 
-**文件**: `agent/tools/browser.go`
-
-```go
-type BrowserTool struct {
-    headless bool
-    timeout  time.Duration
-    outputDir string
-}
+When the user asks about weather:
+1. Use `run_shell` to execute: `curl wttr.in/{city}?format=3`
+2. Parse the output and present it to the user
 ```
 
-### 进程管理
+可以看到这个技能中额外补充了`metadata`数据，可以更好的告诉智能体如何使用这个技能，包括技能的安装，根据当前环境对技能进行筛选等。
 
-- 后台长期命令
-- 终止进程
+技能加载流程大致是这样：先扫描技能目录，再解析 `SKILL.md`，提取元数据和正文；然后检查依赖，看所需的二进制、环境变量、Python/Node 包是否满足；最后采用两阶段注入，先把技能摘要告诉 LLM，再在它调用 `use_skill` 之后注入完整内容。这样既能控制提示词体积，也能减少无关技能对当前任务的干扰。
 
 ---
 
-## 安全机制
+## 多通道支持：Agent 如果进不了消息通道，就永远只是个 Demo
 
-### 允许列表 (Allowlist)
+GoClaw 能接入多种消息平台。每个平台在内部都对应一个 Channel，实现统一接口。Channel 的职责并不复杂：接收消息、转换格式、发送回复。但正是这层抽象，让 Agent 可以同时跑在多个平台上，而不是被某一个 IM 生态绑死。
+
+说得直接一点，Agent 如果进不了真实消息通道，就很容易永远停留在“本地命令行里挺好用”的阶段。
+
+目前已经支持的平台包括：Telegram（Bot 模式）、WhatsApp（Business API）、飞书（机器人）、钉钉（Stream 模式）、微信（个人号扫码登录）、企业微信（机器人）、Slack（Bot）、Discord（Bot）、Google Chat（Bot）、Microsoft Teams（Bot）、百度如流（企业通讯）以及 Gotify（推送）。
+
+微信通道比较特殊，基于腾讯 OpenClaw-weixin 插件协议实现。首次使用需要先扫码登录，完成后才能正常收发消息。
+
+```bash
+# 扫码登录
+goclaw channels weixin login my-weixin
+
+# 查看状态
+goclaw channels weixin status my-weixin
+
+# 登出
+goclaw channels weixin logout my-weixin
+```
+
+> 而且这个微信插件的实现也非常的简单。当微信官方开始灰度OpenClaw的插件的时候，很多开发者都尝试把这个功能接入到其他智能体中。我安装了这个插件后，我就给Claude Code一句话『参考 @tencent-weixin/openclaw-weixin-cli的实现，为goclaw增加微信channel的支持』，Claude Code直接就给我生成了相应的代码。
+
+---
+
+## Gateway 和 Dashboard：一个能长期跑的系统，不能只有聊天窗口
+
+WebSocket Gateway 是一个独立服务，提供 WebSocket 和 HTTP 接口。其他系统可以通过 Gateway 调用 Agent，因此它既可以作为远程入口，也可以作为多端接入层。
+
+这层的意义在于，它把 GoClaw 从“一个本地进程”升级成了“一个可以被其他系统调用的服务”。
+
+```bash
+# 启动 Gateway
+# 更简化的临时运行命令是 goclaw start
+goclaw gateway run
+
+# 自定义端口
+goclaw gateway run --port 8080 --bind 0.0.0.0
+
+# 安装为系统服务
+goclaw gateway install
+goclaw gateway start
+```
+
+Dashboard 则是内置的 Web 界面，提供实时聊天、会话管理、Channel 状态监控、Cron 任务管理、RPC API 调用等能力。启动 Gateway 后，访问 `http://localhost:28789/dashboard/` 就可以直接使用。
+
+---
+
+## Cron 调度系统：真正的助手，应该会自己动起来
+
+如果一个 Agent 只能被动等你发消息，那它更像聊天机器人；只有具备定时执行和后台触发能力，它才更像“长期运行的助手”。GoClaw 内置了定时任务调度器，支持固定时间、固定间隔和 Cron 表达式三种调度方式。
+
+日报、巡检、定时提醒、定时抓取、周期性健康检查，这些都属于“Agent 从对话走向系统”的关键一步。
+
+```bash
+# 定时执行（每天 14:30）
+goclaw cron add --name "Daily Report" --at "14:30" --message "生成日报"
+
+# 间隔执行（每小时）
+goclaw cron add --name "Hourly Check" --every "1h" --system-event "health_check"
+
+# Cron 表达式
+goclaw cron add --name "Weekly Backup" --cron "0 2 * * 0" --message "执行备份"
+
+# 立即运行
+goclaw cron run job-123
+
+# 查看历史
+goclaw cron runs --id job-123
+```
+
+当然更好的方式是在聊天对话框中，使用平常的语言设置定时任务即可。上面的命令行工具是参考OpenClaw实现的命令行管理工具，我们并不常用。
+
+---
+
+## 记忆系统：没有记忆的 Agent，本质上只是一次性会话
+
+一个真正可用的 Agent，不应该每次开口都像“失忆”。GoClaw 的记忆系统大致可以分成三层：第一层是会话记录，也就是本地持久化的 JSONL 对话历史；第二层是向量记忆，用于做语义检索；第三层是 QMD（Quick Markdown Database），用 Markdown 组织长期知识，适合沉淀结构化笔记和长期记忆。
+
+这三层叠在一起，才比较接近“能持续协作”的 Agent，而不是“每次都要重新介绍背景”的聊天模型。
 
 ```json
 {
-  "agents": {
-    "main": {
-      "allowlist": [
-        { "pattern": "/usr/bin/npm", "lastUsedAt": 1706644800 },
-        { "pattern": "/opt/homebrew/bin/git", "lastUsedAt": 1706644900 }
-      ]
+  "memory": {
+    "backend": "builtin",
+    "builtin": {
+      "enabled": true,
+      "database_path": "",
+      "auto_index": true
     }
   }
 }
 ```
 
-### 预批准的安全命令
-
-`jq`、`grep`、`cut`、`sort`、`uniq`、`head`、`tail`、`tr`、`wc` 等
-
-### 危险构造阻止
-
-```bash
-# 这些在执行前会被拒绝：
-npm install $(cat /etc/passwd)  # 命令替换
-cat file > /etc/hosts           # 重定向
-rm -rf / || echo "failed"       # 用 || 链接
-(sudo rm -rf /)                 # 子shell
-```
-
 ---
 
-## LLM 提供商与故障转移
+## 安全机制：Agent 越像助手，就越不能忽视安全
 
-### 支持的提供商
+AI Agent 一旦能读文件、跑命令、访问网络，安全就不是一个附加项，而是基础前提。GoClaw 在这件事上的思路，是把风险拆成多层，再分别处理。
 
-- OpenAI（兼容接口）
-- Anthropic
-- OpenRouter
+很多人聊 Agent，容易把注意力都放在“能不能更强”；但真正进入生产环境之后，优先级往往会立刻反过来，先问“会不会出事”。
 
-### 故障转移机制
+Docker 沙箱是最强的隔离。启用后，所有 shell 命令都在隔离容器中执行，即使命令有问题也不会影响主机。可以配置网络隔离（none 模式完全断网）、资源限制（内存、CPU）、自动清理。这是一个实验性的功能，未来为进行优化，加固安全。
 
-**文件**: `providers/failover.go`
-
-```go
-type FailoverProvider struct {
-    primary         Provider
-    fallback        Provider
-    circuitBreaker  *CircuitBreaker
-    errorClassifier types.ErrorClassifier
+```json
+{
+  "tools": {
+    "shell": {
+      "enabled": true,
+      "denied_cmds": ["rm -rf", "dd", "mkfs"],
+      "sandbox": {
+        "enabled": true,
+        "image": "goclaw/sandbox:latest",
+        "network": "none",
+        "memory": "512m"
+      }
+    }
+  }
 }
 ```
 
-**特性**:
-- **断路器模式** - 防止连续失败时持续调用失败的提供商
-- **错误分类** - 区分可重试和不可重试错误
-- **自动切换** - 主提供商失败时自动切换到备用
+命令过滤是另一层防护。黑名单 `denied_cmds` 阻止危险命令执行，白名单 `allowed_cmds` 只允许特定命令执行。还会阻止危险的 shell 构造，比如命令替换、重定向、子 shell 等。
 
 ---
 
-## 技能系统 (Skills)
+## LLM 提供商：别把整个系统的命门，交给一个模型或一个账号
 
-### 特性
+在工程实践里，模型能力当然重要，但更重要的是不要把整个系统绑死在单一模型或单一账号上。GoClaw 目前主要支持三大类提供商：OpenAI 兼容接口可以接 GPT-4、GPT-4o，也可以接 DeepSeek 这类使用 OpenAI 风格接口的服务，比如最近火热的智谱、kimi、minimax等厂商的模型服务；Anthropic 对应 Claude 3.5、Claude 4 系列；OpenRouter 则适合把多模型路由统一到一个入口。
 
-- **Prompt-Driven** - 技能本质上是注入到 System Prompt 中的指令集
-- **OpenClaw 兼容** - 完全兼容 OpenClaw 的技能生态
-- **自动准入 (Gating)** - 智能检测系统环境
+因为一旦系统真的跑起来，限流、欠费、波动、服务异常都不是“小概率事件”，而是迟早会遇到的日常。
 
-### 技能加载顺序
+故障转移怎么配置？定义多个 profile，设置优先级，启用 failover。当主账号出问题（限流、欠费、服务不可用），自动切换到备用账号。
 
-1. 传入的自定义目录
-2. `workspace/skills/`
-3. `workspace/.goclaw/skills/`
-4. 可执行文件路径 `/skills/`
-5. `./skills/`（当前目录，优先级最高）
+```json
+{
+  "providers": {
+    "profiles": [
+      {
+        "name": "primary",
+        "provider": "openai",
+        "api_key": "...",
+        "priority": 1
+      },
+      {
+        "name": "backup",
+        "provider": "anthropic",
+        "api_key": "...",
+        "priority": 2
+      }
+    ],
+    "failover": {
+      "enabled": true,
+      "strategy": "round_robin"
+    }
+  }
+}
+```
 
 ---
 
-## 项目结构
+## 项目结构：代码是怎么组织起来的
+
+代码组织按功能模块划分。agent/ 是核心逻辑，包括 Agent 主类、Orchestrator 协调器、ContextBuilder、RetryManager、工具注册表、技能加载器等。channels/ 是各种消息通道实现。bus/ 是消息总线。providers/ 是 LLM 提供商对接。session/ 是会话管理。memory/ 是记忆系统。gateway/ 是 WebSocket 网关。cron/ 是定时任务。cli/ 是命令行界面。config/ 是配置管理。
 
 ```
 goclaw/
-├── agent/                  # Agent 核心逻辑
-│   ├── loop.go             # Agent 循环（含重试逻辑）
-│   ├── context.go          # 上下文构建器
-│   ├── memory.go           # 记忆系统
-│   ├── skills.go           # 技能加载器
-│   ├── reflection.go       # 反思机制
-│   ├── error_classifier.go  # 错误分类器
-│   └── tools/              # 工具系统
-│       ├── registry.go
-│       ├── browser.go
-│       ├── filesystem.go
-│       ├── shell.go
-│       └── ...
-├── channels/               # 消息通道
-├── bus/                    # 消息总线
-├── config/                 # 配置管理
-├── providers/              # LLM 提供商
-│   ├── failover.go
-│   ├── circuit.go
-│   └── ...
-├── session/                # 会话管理
-├── memory/                 # 记忆存储
-├── cli/                    # 命令行界面
-└── gateway/                # 网关服务器
+├── agent/                    # Agent 核心逻辑
+│   ├── agent.go             # Agent 主类
+│   ├── orchestrator.go      # 执行协调器
+│   ├── context.go           # 上下文构建器
+│   ├── retry.go             # 重试机制
+│   ├── types.go             # 类型定义
+│   └── tools/               # 工具实现
+├── channels/                 # 消息通道
+├── bus/                      # 消息总线
+├── providers/                # LLM 提供商
+├── session/                  # 会话管理
+├── memory/                   # 记忆系统
+├── gateway/                  # WebSocket 网关
+├── cron/                     # 定时任务
+├── cli/                      # 命令行界面
+├── config/                   # 配置管理
+└── internal/                 # 内部包
 ```
 
 ---
 
-## 与 OpenClaw 的主要区别
+## 快速开始：先跑起来，再慢慢扩展
 
-| 特性 | OpenClaw (TypeScript) | GoClaw (Go) |
-|------|----------------------|-------------|
-| 语言 | TypeScript/Node.js | Go |
-| 并发模型 | 异步/事件循环 | Goroutines + Channels |
-| 浏览器工具 | Playwright | Chrome DevTools Protocol |
-| 部署 | npm 包 | 单一静态链接二进制 |
-| 内存管理 | V8 垃圾回收 | Go 垃圾回收 |
-| 类型系统 | 结构化类型 | 静态强类型 |
-| Agent Loop | PI 极简循环 | 增强循环（+反思） |
-| 会话存储 | Append-Only DAG | Linear JSONL |
-| 扩展机制 | TypeScript Hooks | Skills (Markdown) |
-
----
-
-## 快速开始
+如果你只是想尽快把 GoClaw 跑起来，路径其实很直接：克隆仓库，安装依赖，编译二进制，写最小配置，然后启动。
 
 ```bash
+# 克隆仓库
+git clone https://github.com/smallnest/goclaw.git
+cd goclaw
+
+# 安装依赖
+go mod tidy
+
 # 构建
 go build -o goclaw .
 
-# 配置
-cat > config.json << EOF
+# 或完整构建（包含 UI）
+make build-full
+
+# 创建配置
+cat > ~/.goclaw/config.json << EOF
 {
+  "workspace": {
+    "path": ""
+  },
   "agents": {
     "defaults": {
-      "model": "openrouter:anthropic/claude-opus-4-5",
+      "model": "gpt-4",
       "max_iterations": 15
     }
   },
   "providers": {
-    "openrouter": {
-      "api_key": "your-key"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "your-bot-token"
+    "openai": {
+      "api_key": "YOUR_API_KEY"
     }
   }
 }
@@ -586,18 +488,28 @@ EOF
 
 # 启动
 ./goclaw start
+
+# 或启动 TUI
+./goclaw tui
+
+# 或启动 Gateway（含 Dashboard）
+./goclaw gateway run
+# 访问 http://localhost:28789/dashboard/
 ```
 
 ---
 
-## 总结
+## 设计原则：GoClaw 为什么会长成现在这个样子
 
-GoClaw 继承了 OpenClaw 的核心设计理念，同时利用 Go 语言的特性构建了一个更加健壮、高性能的 AI 助手。
+GoClaw 的设计大致遵循几条原则。
 
-**设计原则**:
-- 极简核心 + 可扩展技能
-- 串行默认，显式并行
-- 可靠性优于复杂性
-- 完全可观测（日志 + 会话持久化）
+- **极简核心，可扩展技能**：核心工具保持克制，把扩展能力交给技能系统，避免核心不断膨胀。
+- **串行默认，显式并行**：消息处理默认串行，尽量减少竞态；真的需要并行时，再显式引入。
+- **可靠性优于复杂性**：重试、故障转移、熔断器这些能力不是“锦上添花”，而是默认配置。
+- **完全可观测**：结构化日志、会话持久化、任务轨迹都尽量保留，出了问题要能查。
+- **遵循 Go 的工程习惯**：Context 传播、Channel 通信、接口组合，不强行套一层不必要的抽象。
 
-> "这种简单性可能是优势也可能是陷阱，取决于你的视角。但我总是倾向于可解释的简单性，而不是复杂的意大利面条代码。"
+如果把这篇文章压缩成一句结论，那就是：GoClaw 并不是想在 Agent 世界里发明一种全新的范式，而是想把一套已经被验证过的设计，用 Go 的方式做得更稳、更轻、更容易落地。
+
+如果你也在做 Agent，而且已经开始从“怎么把 Demo 跑起来”，转向“怎么把系统长期跑下去”，那么 GoClaw 也许正是一个值得参考的方向。
+

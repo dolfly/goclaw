@@ -1,14 +1,14 @@
-# Docker Sandboxing for Shell Tool
+# Docker 沙箱隔离
 
-## Overview
+## 概述
 
-The Shell tool supports Docker-based sandboxing for secure command execution. When enabled, all shell commands run inside isolated Docker containers instead of directly on the host system.
+Shell 工具支持基于 Docker 的沙箱隔离。启用后，所有 shell 命令都在隔离的 Docker 容器中执行，而非直接在主机系统上运行。
 
-## Configuration
+## 配置
 
-### Enable Sandbox
+### 启用沙箱
 
-Add the following to your `~/.goclaw/config.json`:
+在 `~/.goclaw/config.json` 中添加以下配置：
 
 ```json
 {
@@ -23,47 +23,55 @@ Add the following to your `~/.goclaw/config.json`:
 }
 ```
 
-### Full Configuration Options
+### 完整配置选项
 
 ```json
 {
   "tools": {
     "shell": {
       "enabled": true,
+      "allowed_cmds": [],
+      "denied_cmds": ["rm -rf", "dd", "mkfs", "format"],
+      "timeout": 30,
+      "working_dir": "",
       "sandbox": {
         "enabled": true,
         "image": "goclaw/sandbox:latest",
         "workdir": "/workspace",
         "remove": true,
         "network": "none",
-        "privileged": false
+        "privileged": false,
+        "memory": "512m",
+        "cpu_quota": 50000
       }
     }
   }
 }
 ```
 
-### Configuration Fields
+### 配置字段
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable/disable Docker sandboxing |
-| `image` | string | `goclaw/sandbox:latest` | Docker image to use for containers |
-| `workdir` | string | `/workspace` | Working directory inside the container |
-| `remove` | bool | `true` | Automatically remove container after execution |
-| `network` | string | `none` | Network mode (`none`, `bridge`, `host`) |
-| `privileged` | bool | `false` | Run container in privileged mode |
+| 字段 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `enabled` | bool | `false` | 启用/禁用 Docker 沙箱 |
+| `image` | string | `goclaw/sandbox:latest` | 容器使用的 Docker 镜像 |
+| `workdir` | string | `/workspace` | 容器内的工作目录 |
+| `remove` | bool | `true` | 执行后自动删除容器 |
+| `network` | string | `none` | 网络模式 (`none`, `bridge`, `host`) |
+| `privileged` | bool | `false` | 以特权模式运行容器 |
+| `memory` | string | `""` | 内存限制（如 `512m`, `1g`） |
+| `cpu_quota` | int | `0` | CPU 配额（微秒，50000 = 50%） |
 
-## Building the Sandbox Image
+## 构建沙箱镜像
 
 ### Dockerfile
 
-Create a `Dockerfile` with the following content:
+创建一个 `Dockerfile`：
 
 ```dockerfile
 FROM alpine:latest
 
-# Install common tools
+# 安装常用工具
 RUN apk add --no-cache \
     bash \
     curl \
@@ -78,28 +86,30 @@ RUN apk add --no-cache \
     grep \
     sed \
     awk \
-    ca-certificates
+    ca-certificates \
+    openssh-client \
+    rsync
 
-# Set working directory
+# 设置工作目录
 WORKDIR /workspace
 
 CMD ["/bin/sh"]
 ```
 
-### Build the Image
+### 构建镜像
 
 ```bash
-# Build the image
+# 构建镜像
 docker build -t goclaw/sandbox:latest .
 
-# Or push to Docker Hub for remote use
+# 推送到 Docker Hub 以便远程使用
 docker tag goclaw/sandbox:latest <username>/goclaw-sandbox:latest
 docker push <username>/goclaw-sandbox:latest
 ```
 
-### Using a Pre-built Image
+### 使用预构建镜像
 
-If you're using a custom image from Docker Hub, update the config:
+如果使用 Docker Hub 上的自定义镜像，更新配置：
 
 ```json
 {
@@ -114,154 +124,212 @@ If you're using a custom image from Docker Hub, update the config:
 }
 ```
 
-## How It Works
+## 工作原理
 
-### Execution Flow
+### 执行流程
 
-1. **Initialization**: When sandbox is enabled, a Docker client is initialized
-2. **Container Creation**: Each command creates a new container with:
-   - Workspace directory mounted from host
-   - Network isolation (by default)
-   - Auto-removal after completion
-3. **Command Execution**: The command runs inside the container
-4. **Output Capture**: stdout and stderr are captured and returned
-5. **Cleanup**: Container is removed (if `remove: true`)
+```
+用户命令请求
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Shell Tool                              │
+│                                                              │
+│  检查 sandbox.enabled                                        │
+│      │                                                       │
+│      ├── false ──► 直接在主机执行                            │
+│      │                                                       │
+│      └── true ──► Docker 沙箱执行                            │
+│                     │                                        │
+│                     ▼                                        │
+│            ┌────────────────────────────────────┐            │
+│            │     Docker 容器创建                 │            │
+│            │  - 挂载工作区目录                   │            │
+│            │  - 设置网络隔离                     │            │
+│            │  - 配置资源限制                     │            │
+│            │  - 注入环境变量                     │            │
+│            └──────────────┬─────────────────────┘            │
+│                           │                                  │
+│                           ▼                                  │
+│            ┌────────────────────────────────────┐            │
+│            │     容器内执行命令                  │            │
+│            │  - 超时控制                         │            │
+│            │  - 输出捕获                         │            │
+│            └──────────────┬─────────────────────┘            │
+│                           │                                  │
+│                           ▼                                  │
+│            ┌────────────────────────────────────┐            │
+│            │     清理容器                        │            │
+│            │  - 移除容器（如果 remove=true）      │            │
+│            └────────────────────────────────────┘            │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼
+返回结果给 Agent
+```
 
-### Workspace Mounting
+### 工作区挂载
 
-The workspace directory is mounted into the container at the path specified by `workdir`:
+工作区目录被挂载到容器中指定的 `workdir` 路径：
 
-| Host Path | Container Path |
-|-----------|----------------|
+| 主机路径 | 容器路径 |
+|----------|----------|
 | `~/.goclaw/workspace` | `/workspace` |
+| 或配置中的 workspace | |
 
-Files created in the workspace are accessible on the host system.
+在容器中创建的文件会保存到主机的工作区目录。
 
-### Network Modes
+### 网络模式
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `none` | No network access (default) | Maximum security, offline operations |
-| `bridge` | Isolated bridge network | Allow outbound network access |
-| `host` | Host network | Full network access (not recommended) |
+| 模式 | 描述 | 使用场景 |
+|------|------|----------|
+| `none` | 无网络访问（默认） | 最大安全性，离线操作 |
+| `bridge` | 隔离的桥接网络 | 允许出站网络访问 |
+| `host` | 主机网络 | 完整网络访问（不推荐） |
 
-## Security Considerations
+## 安全考虑
 
-### Recommended Settings
+### 推荐设置
 
 ```json
 {
   "tools": {
     "shell": {
+      "enabled": true,
+      "denied_cmds": ["rm -rf", "dd", "mkfs", "format", ":(){ :|:& };:"],
       "sandbox": {
         "enabled": true,
         "network": "none",
         "privileged": false,
-        "remove": true
+        "remove": true,
+        "memory": "512m",
+        "cpu_quota": 50000
       }
     }
   }
 }
 ```
 
-### Security Benefits
+### 安全优势
 
-- **Isolation**: Commands run in isolated containers
-- **Network Isolation**: Default `none` mode prevents network access
-- **No Privilege Escalation**: Default non-privileged mode
-- **Automatic Cleanup**: Containers are removed after execution
-- **Resource Limits**: Docker enforces resource constraints
+- **隔离性**：命令在隔离容器中运行
+- **网络隔离**：默认 `none` 模式阻止网络访问
+- **无权限提升**：默认非特权模式
+- **自动清理**：执行后自动删除容器
+- **资源限制**：Docker 强制执行资源约束
+- **命令过滤**：`denied_cmds` 额外保护
 
-### Potential Risks
+### 潜在风险
 
-- **File Access**: Workspace is mounted with full read/write access
-- **Privileged Mode**: Never enable `privileged: true` in production
-- **Host Network**: Avoid `network: "host"` unless necessary
+- **文件访问**：工作区以完全读写权限挂载
+- **特权模式**：生产环境中绝不要启用 `privileged: true`
+- **主机网络**：除非必要，避免使用 `network: "host"`
 
-## Usage Examples
+## 使用示例
 
-### Basic Command Execution
-
-```bash
-# With sandbox enabled
-goclaw chat
-➤ echo "Hello, World!"
-[Tool: exec]
-[Result: Hello, World!]
-```
-
-### Python Script Execution
+### 基本命令执行
 
 ```bash
-➤ python3 -c "print(2 ** 10)"
-[Tool: exec]
-[Result: 1024]
+# 启用沙箱后
+goclaw agent --message "列出当前目录文件"
+
+# Agent 执行:
+# Tool: run_shell
+# Command: ls -la
+# [在容器中执行]
+# Result: 文件列表...
 ```
 
-### Network Restrictions
-
-With `network: "none"`:
+### Python 脚本执行
 
 ```bash
-➤ curl https://example.com
-[Tool: exec]
-[Result: curl: (6) Could not resolve host: example.com]
+goclaw agent --message "运行 Python 计算 2 的 10 次方"
+
+# Agent 执行:
+# Tool: run_shell
+# Command: python3 -c "print(2 ** 10)"
+# [Result: 1024]
 ```
 
-## Troubleshooting
+### 网络限制
 
-### Docker Not Running
+使用 `network: "none"` 时：
+
+```bash
+goclaw agent --message "访问 https://example.com"
+
+# Agent 执行:
+# Tool: run_shell
+# Command: curl https://example.com
+# [Result: curl: (6) Could not resolve host: example.com]
+```
+
+如需网络访问，使用 `network: "bridge"`。
+
+## 故障排查
+
+### Docker 未运行
 
 ```
 Failed to initialize Docker client, sandbox disabled
 ```
 
-**Solution**: Start Docker Desktop or Docker Daemon.
+**解决方案**：启动 Docker Desktop 或 Docker 守护进程。
 
-### Image Not Found
+### 镜像未找到
 
 ```
 failed to create container: Error response from daemon: pull access denied for goclaw/sandbox
 ```
 
-**Solution**: Build or pull the required image.
+**解决方案**：构建或拉取所需镜像。
 
-### Permission Denied
+### 权限被拒绝
 
 ```
 failed to start container: permission denied
 ```
 
-**Solution**: Ensure your user has Docker permissions.
+**解决方案**：确保用户有 Docker 权限（将用户添加到 docker 组）。
 
-## Architecture
+### 容器超时
+
+```
+tool execution timed out after 3m0s
+```
+
+**解决方案**：增加工具超时时间或优化命令。
+
+## 架构图
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        goclaw Agent                         │
+│                        goclaw Agent                          │
 │                                                              │
 │  ┌──────────────┐         ┌──────────────────────────────┐ │
 │  │  Shell Tool  │ ──────► │  Docker API                  │ │
 │  │              │         │                              │ │
-│  │  exec()      │         │  ContainerCreate()           │ │
+│  │  run_shell() │         │  ContainerCreate()           │ │
 │  │  ┌────────┐  │         │  ContainerStart()            │ │
 │  │  │Direct  │  │         │  ContainerWait()             │ │
-│  │  │        │  │         │  ContainerLogs()             │ │
+│  │  │Exec    │  │         │  ContainerLogs()             │ │
 │  │  └────────┘  │         │  ContainerRemove()           │ │
 │  │  ┌────────┐  │         │                              │ │
 │  │  │Sandbox │  │         │  ┌────────────────────────┐  │ │
-│  │  │        │  │         │  │ goclaw/sandbox:latest │  │ │
+│  │  │Mode    │  │         │  │ goclaw/sandbox:latest │  │ │
 │  │  └────────┘  │         │  │  - bash                │  │ │
 │  └──────────────┘         │  │  - python3             │  │ │
 │                            │  │  - nodejs              │  │ │
+│                            │  │  - git                 │  │ │
 │                            │  └────────────────────────┘  │ │
 │                            └──────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## API Reference
+## API 参考
 
-### ShellTool Structure
+### ShellTool 结构
 
 ```go
 type ShellTool struct {
@@ -270,26 +338,53 @@ type ShellTool struct {
     deniedCmds    []string
     timeout       time.Duration
     workingDir    string
-    sandboxConfig config.SandboxConfig
+    sandboxConfig SandboxConfig
     dockerClient  *client.Client
 }
 ```
 
-### SandboxConfig Structure
+### SandboxConfig 结构
 
 ```go
 type SandboxConfig struct {
-    Enabled    bool   `mapstructure:"enabled"`
-    Image      string `mapstructure:"image"`
-    Workdir    string `mapstructure:"workdir"`
-    Remove     bool   `mapstructure:"remove"`
-    Network    string `mapstructure:"network"`
-    Privileged bool   `mapstructure:"privileged"`
+    Enabled    bool   `mapstructure:"enabled" json:"enabled"`
+    Image      string `mapstructure:"image" json:"image"`
+    Workdir    string `mapstructure:"workdir" json:"workdir"`
+    Remove     bool   `mapstructure:"remove" json:"remove"`
+    Network    string `mapstructure:"network" json:"network"`
+    Privileged bool   `mapstructure:"privileged" json:"privileged"`
+    Memory     string `mapstructure:"memory" json:"memory"`
+    CPUQuota   int    `mapstructure:"cpu_quota" json:"cpu_quota"`
 }
 ```
 
-## See Also
+## 与技能系统配合
 
-- [Configuration Guide](./Configuration.md)
-- [Shell Tool](./Shell.md)
-- [Security Best Practices](./Security.md)
+当使用技能系统时，如果技能需要特定的二进制或包：
+
+1. **技能 SKILL.md 配置依赖**：
+   ```yaml
+   metadata:
+     openclaw:
+       requires:
+         bins: ["python3", "pip"]
+         pythonPkgs: ["requests"]
+       install:
+         - kind: pip
+           package: requests
+   ```
+
+2. **沙箱镜像预装依赖**：
+   在 Dockerfile 中预装技能所需工具：
+   ```dockerfile
+   RUN pip3 install requests
+   ```
+
+3. **或者动态安装**：
+   Agent 会在检测到缺失依赖时尝试安装（如果 `GOCLAW_SKILL_AUTO_INSTALL=true`）。
+
+## 相关文档
+
+- [配置指南](./cli.md)
+- [技能系统](./skills.md)
+- [Agent 架构](./agent-design.md)
