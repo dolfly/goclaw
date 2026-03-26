@@ -14,6 +14,7 @@ type ProviderType string
 
 const (
 	ProviderTypeOpenAI     ProviderType = "openai"
+	ProviderTypeQianfan    ProviderType = "qianfan"
 	ProviderTypeAnthropic  ProviderType = "anthropic"
 	ProviderTypeOpenRouter ProviderType = "openrouter"
 )
@@ -41,6 +42,9 @@ func NewSimpleProvider(cfg *config.Config) (Provider, error) {
 	case ProviderTypeOpenAI:
 		timeout := time.Duration(cfg.Providers.OpenAI.Timeout) * time.Second
 		return NewOpenAIProviderWithTimeout(cfg.Providers.OpenAI.APIKey, cfg.Providers.OpenAI.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
+	case ProviderTypeQianfan:
+		timeout := time.Duration(cfg.Providers.Qianfan.Timeout) * time.Second
+		return NewOpenAIProviderWithTimeout(cfg.Providers.Qianfan.APIKey, cfg.Providers.Qianfan.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
 	case ProviderTypeAnthropic:
 		timeout := time.Duration(cfg.Providers.Anthropic.Timeout) * time.Second
 		return NewAnthropicProviderWithTimeout(cfg.Providers.Anthropic.APIKey, cfg.Providers.Anthropic.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
@@ -100,8 +104,12 @@ func NewRotationProviderFromConfig(cfg *config.Config) (Provider, error) {
 
 // createProviderByType 根据类型创建提供商
 func createProviderByType(providerType, apiKey, baseURL, model string, maxTokens int) (Provider, error) {
+	model = normalizeModelForProvider(ProviderType(providerType), model)
+
 	switch ProviderType(providerType) {
 	case ProviderTypeOpenAI:
+		return NewOpenAIProvider(apiKey, baseURL, model, maxTokens)
+	case ProviderTypeQianfan:
 		return NewOpenAIProvider(apiKey, baseURL, model, maxTokens)
 	case ProviderTypeAnthropic:
 		return NewAnthropicProvider(apiKey, baseURL, model, maxTokens)
@@ -118,15 +126,19 @@ func determineProvider(cfg *config.Config) (ProviderType, string, error) {
 
 	// 检查模型名称前缀
 	if strings.HasPrefix(model, "openrouter:") {
-		return ProviderTypeOpenRouter, strings.TrimPrefix(model, "openrouter:"), nil
+		return ProviderTypeOpenRouter, normalizeModelForProvider(ProviderTypeOpenRouter, model), nil
+	}
+
+	if strings.HasPrefix(model, "qianfan:") {
+		return ProviderTypeQianfan, normalizeModelForProvider(ProviderTypeQianfan, model), nil
 	}
 
 	if strings.HasPrefix(model, "anthropic:") || strings.HasPrefix(model, "claude-") {
-		return ProviderTypeAnthropic, model, nil
+		return ProviderTypeAnthropic, normalizeModelForProvider(ProviderTypeAnthropic, model), nil
 	}
 
 	if strings.HasPrefix(model, "openai:") || strings.HasPrefix(model, "gpt-") {
-		return ProviderTypeOpenAI, model, nil
+		return ProviderTypeOpenAI, normalizeModelForProvider(ProviderTypeOpenAI, model), nil
 	}
 
 	// 根据可用的 API key 决定
@@ -138,9 +150,28 @@ func determineProvider(cfg *config.Config) (ProviderType, string, error) {
 		return ProviderTypeAnthropic, model, nil
 	}
 
+	if cfg.Providers.Qianfan.APIKey != "" {
+		return ProviderTypeQianfan, model, nil
+	}
+
 	if cfg.Providers.OpenAI.APIKey != "" {
 		return ProviderTypeOpenAI, model, nil
 	}
 
 	return "", "", fmt.Errorf("no LLM provider API key configured")
+}
+
+func normalizeModelForProvider(providerType ProviderType, model string) string {
+	switch providerType {
+	case ProviderTypeOpenRouter:
+		return strings.TrimPrefix(model, "openrouter:")
+	case ProviderTypeAnthropic:
+		return strings.TrimPrefix(model, "anthropic:")
+	case ProviderTypeQianfan:
+		return strings.TrimPrefix(model, "qianfan:")
+	case ProviderTypeOpenAI:
+		return strings.TrimPrefix(model, "openai:")
+	default:
+		return model
+	}
 }

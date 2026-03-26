@@ -157,3 +157,50 @@ func TestValidatorMissingProvider(t *testing.T) {
 		t.Error("expected error when no provider is configured")
 	}
 }
+
+func TestValidatorValidQianfanConfig(t *testing.T) {
+	validator := NewValidator(true)
+
+	cfg := &Config{
+		Agents: AgentsConfig{
+			Defaults: AgentDefaults{
+				Model:         "qianfan:deepseek-v3.2",
+				MaxIterations: 10,
+				Temperature:   0.7,
+				MaxTokens:     2048,
+			},
+		},
+		Providers: ProvidersConfig{
+			Qianfan: OpenAIProviderConfig{
+				APIKey:  "bce-v3/test-valid-api-key-12345",
+				BaseURL: "https://qianfan.baidubce.com/v2",
+				Timeout: 600,
+			},
+		},
+		Gateway: GatewayConfig{
+			Port:         8080,
+			ReadTimeout:  30,
+			WriteTimeout: 30,
+			WebSocket: WebSocketConfig{
+				Host:         "localhost",
+				Port:         8081,
+				PingInterval: 30 * time.Second,
+				PongTimeout:  30 * time.Second,
+				ReadTimeout:  30 * time.Second,
+				WriteTimeout: 30 * time.Second,
+			},
+		},
+		Tools: ToolsConfig{
+			Web: WebToolConfig{
+				Timeout: 10,
+			},
+		},
+		Memory: MemoryConfig{
+			Backend: "builtin",
+		},
+	}
+
+	if err := validator.Validate(cfg); err != nil {
+		t.Errorf("expected valid qianfan config, got error: %v", err)
+	}
+}

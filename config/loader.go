@@ -155,6 +155,8 @@ func HasProvider(cfg *Config, provider string) bool {
 	switch provider {
 	case "openai":
 		return cfg.Providers.OpenAI.APIKey != ""
+	case "qianfan":
+		return cfg.Providers.Qianfan.APIKey != ""
 	case "anthropic":
 		return cfg.Providers.Anthropic.APIKey != ""
 	case "openrouter":

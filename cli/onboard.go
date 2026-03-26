@@ -38,7 +38,7 @@ func init() {
 	onboardCmd.Flags().StringVarP(&onboardAPIKey, "api-key", "k", "", "API key for the provider (required in non-interactive mode)")
 	onboardCmd.Flags().StringVarP(&onboardBaseURL, "base-url", "u", "", "Base URL for the provider API")
 	onboardCmd.Flags().StringVarP(&onboardModel, "model", "m", "", "Model name to use")
-	onboardCmd.Flags().StringVarP(&onboardProvider, "provider", "p", "openai", "Provider: openai, anthropic, or openrouter")
+	onboardCmd.Flags().StringVarP(&onboardProvider, "provider", "p", "openai", "Provider: openai, qianfan, anthropic, or openrouter")
 	onboardCmd.Flags().BoolVar(&onboardSkipPrompts, "skip-prompts", false, "Skip all prompts (use defaults)")
 }
 
@@ -126,6 +126,14 @@ func nonInteractiveSetup(cfg *config.Config) error {
 		if onboardModel != "" {
 			cfg.Agents.Defaults.Model = onboardModel
 		}
+	case "qianfan":
+		cfg.Providers.Qianfan.APIKey = onboardAPIKey
+		if onboardBaseURL != "" {
+			cfg.Providers.Qianfan.BaseURL = onboardBaseURL
+		}
+		if onboardModel != "" {
+			cfg.Agents.Defaults.Model = onboardModel
+		}
 	case "anthropic":
 		cfg.Providers.Anthropic.APIKey = onboardAPIKey
 		if onboardBaseURL != "" {
@@ -143,7 +151,7 @@ func nonInteractiveSetup(cfg *config.Config) error {
 			cfg.Agents.Defaults.Model = onboardModel
 		}
 	default:
-		return fmt.Errorf("invalid provider: %s (must be openai, anthropic, or openrouter)", provider)
+		return fmt.Errorf("invalid provider: %s (must be openai, qianfan, anthropic, or openrouter)", provider)
 	}
 
 	fmt.Printf("  ✓ Provider configured: %s\n", provider)
@@ -156,6 +164,7 @@ func interactiveSetup(cfg *config.Config) error {
 
 	// Check if any provider already has an API key
 	hasAPIKey := cfg.Providers.OpenAI.APIKey != "" ||
+		cfg.Providers.Qianfan.APIKey != "" ||
 		cfg.Providers.Anthropic.APIKey != "" ||
 		cfg.Providers.OpenRouter.APIKey != ""
 
@@ -163,7 +172,7 @@ func interactiveSetup(cfg *config.Config) error {
 		fmt.Println("  API key already configured. Press Enter to keep or enter new value:")
 	} else {
 		fmt.Println("  Let's configure your API key.")
-		fmt.Println("  Supported providers: openai, anthropic, openrouter")
+		fmt.Println("  Supported providers: openai, qianfan, anthropic, openrouter")
 	}
 
 	// Prompt for provider
@@ -181,6 +190,12 @@ func interactiveSetup(cfg *config.Config) error {
 			defaultBaseURL = cfg.Providers.OpenAI.BaseURL
 		} else {
 			defaultBaseURL = "https://api.openai.com/v1"
+		}
+	case "qianfan":
+		if cfg.Providers.Qianfan.BaseURL != "" {
+			defaultBaseURL = cfg.Providers.Qianfan.BaseURL
+		} else {
+			defaultBaseURL = "https://qianfan.baidubce.com/v2"
 		}
 	case "anthropic":
 		if cfg.Providers.Anthropic.BaseURL != "" {
@@ -203,6 +218,8 @@ func interactiveSetup(cfg *config.Config) error {
 		switch provider {
 		case "openai":
 			defaultModel = "gpt-4o"
+		case "qianfan":
+			defaultModel = "qianfan:deepseek-v3.2"
 		case "anthropic":
 			defaultModel = "claude-opus-4-5"
 		case "openrouter":
@@ -216,6 +233,10 @@ func interactiveSetup(cfg *config.Config) error {
 	case "openai":
 		cfg.Providers.OpenAI.APIKey = apiKey
 		cfg.Providers.OpenAI.BaseURL = baseURL
+		cfg.Agents.Defaults.Model = model
+	case "qianfan":
+		cfg.Providers.Qianfan.APIKey = apiKey
+		cfg.Providers.Qianfan.BaseURL = baseURL
 		cfg.Agents.Defaults.Model = model
 	case "anthropic":
 		cfg.Providers.Anthropic.APIKey = apiKey

@@ -193,6 +193,14 @@ func (v *Validator) validateProviders(cfg *Config) error {
 		}
 	}
 
+	// Validate Qianfan
+	if cfg.Providers.Qianfan.APIKey != "" {
+		hasProvider = true
+		if err := v.validateAPIKey(cfg.Providers.Qianfan.APIKey); err != nil {
+			return errors.Wrap(err, errors.ErrCodeInvalidConfig, "invalid Qianfan API key")
+		}
+	}
+
 	// Validate Anthropic
 	if cfg.Providers.Anthropic.APIKey != "" {
 		hasProvider = true
@@ -212,7 +220,7 @@ func (v *Validator) validateProviders(cfg *Config) error {
 		}
 
 		// Check if provider type is valid
-		validProviders := []string{"openai", "anthropic", "openrouter"}
+		validProviders := []string{"openai", "qianfan", "anthropic", "openrouter"}
 		if !slices.Contains(validProviders, profile.Provider) {
 			return errors.InvalidConfig(fmt.Sprintf("provider profile '%s' has invalid provider type: %s",
 				profile.Name, profile.Provider))

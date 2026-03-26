@@ -10,14 +10,15 @@ This guide covers configuring goclaw, including new features like multi-provider
 {
   "agents": {
     "defaults": {
-      "model": "gpt-4",
+      "model": "qianfan:deepseek-v3.2",
       "max_iterations": 15,
       "temperature": 0.7
     }
   },
   "providers": {
-    "openai": {
-      "api_key": "your-api-key"
+    "qianfan": {
+      "api_key": "your-qianfan-api-key",
+      "base_url": "https://qianfan.baidubce.com/v2"
     }
   },
   "channels": {
@@ -36,6 +37,11 @@ This guide covers configuring goclaw, including new features like multi-provider
 ```json
 {
   "providers": {
+    "qianfan": {
+      "api_key": "bce-v3/...",
+      "base_url": "https://qianfan.baidubce.com/v2",
+      "timeout": 600
+    },
     "openai": {
       "api_key": "sk-...",
       "base_url": "https://api.openai.com/v1",
@@ -74,9 +80,9 @@ Configure multiple API keys per provider with automatic failover:
     },
     "profiles": [
       {
-        "name": "openai-primary",
-        "provider": "openai",
-        "api_key": "sk-primary-...",
+        "name": "qianfan-primary",
+        "provider": "qianfan",
+        "api_key": "bce-v3/primary-...",
         "priority": 1
       },
       {
@@ -265,6 +271,7 @@ When a profile fails:
 Models can be specified with prefixes:
 
 - `gpt-4`: Use OpenAI
+- `qianfan:deepseek-v3.2`: Explicitly use Qianfan
 - `claude-3-opus-20240229`: Use Anthropic
 - `openrouter:anthropic/claude-opus-4-5`: Use OpenRouter
 - `openai:gpt-4-turbo`: Explicitly use OpenAI

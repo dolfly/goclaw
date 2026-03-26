@@ -293,6 +293,7 @@ type WeixinChannelConfig struct {
 type ProvidersConfig struct {
 	OpenRouter OpenRouterProviderConfig `mapstructure:"openrouter" json:"openrouter"`
 	OpenAI     OpenAIProviderConfig     `mapstructure:"openai" json:"openai"`
+	Qianfan    OpenAIProviderConfig     `mapstructure:"qianfan" json:"qianfan"`
 	Anthropic  AnthropicProviderConfig  `mapstructure:"anthropic" json:"anthropic"`
 	Profiles   []ProviderProfileConfig  `mapstructure:"profiles" json:"profiles"`
 	Failover   FailoverConfig           `mapstructure:"failover" json:"failover"`
@@ -301,7 +302,7 @@ type ProvidersConfig struct {
 // ProviderProfileConfig 提供商配置
 type ProviderProfileConfig struct {
 	Name     string `mapstructure:"name" json:"name"`
-	Provider string `mapstructure:"provider" json:"provider"` // openai, anthropic, openrouter
+	Provider string `mapstructure:"provider" json:"provider"` // openai, qianfan, anthropic, openrouter
 	APIKey   string `mapstructure:"api_key" json:"api_key"`
 	BaseURL  string `mapstructure:"base_url" json:"base_url"`
 	Priority int    `mapstructure:"priority" json:"priority"`
