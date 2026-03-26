@@ -89,6 +89,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("tools.browser.enabled", false)
 	v.SetDefault("browser.headless", true)
 	v.SetDefault("browser.timeout", 30)
+
+	// OpenClaw-compatible defaults
+	v.SetDefault("auth.profiles", map[string]interface{}{})
+	v.SetDefault("auth.order", map[string]interface{}{})
+	v.SetDefault("models.mode", "merge")
+	v.SetDefault("models.providers", map[string]interface{}{})
 }
 
 // Save 保存配置到文件
@@ -152,18 +158,8 @@ func HasProvider(cfg *Config, provider string) bool {
 	if cfg == nil {
 		return false
 	}
-	switch provider {
-	case "openai":
-		return cfg.Providers.OpenAI.APIKey != ""
-	case "qianfan":
-		return cfg.Providers.Qianfan.APIKey != ""
-	case "anthropic":
-		return cfg.Providers.Anthropic.APIKey != ""
-	case "openrouter":
-		return cfg.Providers.OpenRouter.APIKey != ""
-	default:
-		return false
-	}
+	_, exists := cfg.Models.Providers[provider]
+	return exists
 }
 
 // GetGatewayWebSocketURL 获取 Gateway WebSocket URL

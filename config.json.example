@@ -5,64 +5,10 @@
   "agents": {
     "defaults": {
       "model": "qianfan:kimi-k2.5",
-      "max_iterations": 15,
+      "max_iterations": 20,
       "temperature": 0.7,
-      "max_tokens": 4096
+      "max_tokens": 64000
     }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": false,
-      "token": "",
-      "allowed_ids": []
-    },
-    "whatsapp": {
-      "enabled": false,
-      "bridge_url": "",
-      "allowed_ids": []
-    },
-    "feishu": {
-      "enabled": false,
-      "app_id": "",
-      "app_secret": "",
-      "domain": "feishu",
-      "group_policy": "open"
-    },
-    "qq": {
-      "enabled": false,
-      "app_id": "",
-      "app_secret": "",
-      "allowed_ids": []
-    },
-    "wework": {
-      "enabled": false,
-      "corp_id": "",
-      "agent_id": "",
-      "secret": "",
-      "token": "",
-      "encoding_aes_key": ""
-    },
-    "infoflow": {
-      "enabled": false,
-      "webhook_url": "",
-      "token": "",
-      "aes_key": "",
-      "webhook_port": 18766,
-      "allowed_ids": []
-    },
-    "gotify": {
-      "enabled": false,
-      "server_url": "https://gotify.example.com",
-      "app_token": "",
-      "priority": 5,
-      "allowed_ids": []
-    },
-    "slack": {
-      "enabled": false,
-      "token": "",
-      "signing_secret": "",
-      "allowed_ids": []
-    },
   },
   "models": {
     "mode": "merge",
@@ -81,6 +27,54 @@
           }
         ]
       }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "token": "",
+      "allowed_ids": []
+    },
+    "whatsapp": {
+      "enabled": false,
+      "bridge_url": "",
+      "allowed_ids": []
+    },
+    "feishu": {
+      "enabled": true,
+      "app_id": "cli_xxxxxxxx",
+      "app_secret": "xxxxxxx",
+      "domain": "feishu",
+      "groupPolicy": "open",
+      "dm_policy": "pairing"
+    },
+    "qq": {
+      "enabled": false,
+      "app_id": "",
+      "app_secret": "",
+      "allowed_ids": []
+    },
+    "wework": {
+      "enabled": false,
+      "corp_id": "",
+      "agent_id": "",
+      "secret": "",
+      "token": "",
+      "encoding_aes_key": ""
+    },
+    "dingtalk": {
+      "enabled": false,
+      "client_id": "",
+      "secret": "",
+      "allowed_ids": []
+    },
+    "infoflow": {
+      "enabled": false,
+      "webhook_url": "",
+      "token": "",
+      "aes_key": "",
+      "webhook_port": 18766,
+      "allowed_ids": []
     }
   },
   "gateway": {
@@ -108,7 +102,11 @@
     "shell": {
       "enabled": true,
       "allowed_cmds": [],
-      "denied_cmds": ["rm -rf", "dd", "mkfs", "format"],
+      "denied_cmds": [
+        "rm -rf",
+        "dd",
+        "mkfs"
+      ],
       "timeout": 30,
       "working_dir": ""
     },
@@ -120,9 +118,7 @@
     "browser": {
       "enabled": true,
       "headless": true,
-      "timeout": 30,
-      "relay_url": "ws://127.0.0.1:18789",
-      "relay_mode": "auto"
+      "timeout": 30
     },
     "cron": {
       "enabled": true,

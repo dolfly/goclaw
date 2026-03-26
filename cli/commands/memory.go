@@ -281,15 +281,18 @@ func runBuiltinIndex(workspace string, cfg *config.Config) {
 	memoryDir := filepath.Join(workspace, "memory")
 	dbPath := filepath.Join(home, ".goclaw", "memory", "store.db")
 
-	// Load config for API key
-	apiKey := cfg.Providers.OpenAI.APIKey
-	if apiKey == "" {
-		apiKey = cfg.Providers.OpenRouter.APIKey
+	// Load config for API key - use models.providers format
+	var apiKey string
+	for _, provider := range cfg.Models.Providers {
+		if provider.APIKey != "" {
+			apiKey = provider.APIKey
+			break
+		}
 	}
 
 	if apiKey == "" {
 		fmt.Fprintf(os.Stderr, "Error: No embedding provider API key found in config.\n")
-		fmt.Fprintf(os.Stderr, "Please configure OpenAI or OpenRouter API key in ~/.goclaw/config.json\n")
+		fmt.Fprintf(os.Stderr, "Please configure a provider API key in models.providers in ~/.goclaw/config.json\n")
 		os.Exit(1)
 	}
 

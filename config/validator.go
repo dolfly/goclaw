@@ -174,72 +174,33 @@ func (v *Validator) validateSubagentsConfig(subagents *AgentSubagentConfig) erro
 
 // validateProviders validates LLM provider configuration
 func (v *Validator) validateProviders(cfg *Config) error {
-	// Check if at least one provider is configured
-	hasProvider := false
-
-	// Validate OpenRouter
-	if cfg.Providers.OpenRouter.APIKey != "" {
-		hasProvider = true
-		if err := v.validateAPIKey(cfg.Providers.OpenRouter.APIKey); err != nil {
-			return errors.Wrap(err, errors.ErrCodeInvalidConfig, "invalid OpenRouter API key")
-		}
+	// Check if at least one provider is configured in models.providers
+	if !cfg.Models.HasProviders() {
+		return errors.InvalidConfig("at least one LLM provider must be configured in models.providers")
 	}
 
-	// Validate OpenAI
-	if cfg.Providers.OpenAI.APIKey != "" {
-		hasProvider = true
-		if err := v.validateAPIKey(cfg.Providers.OpenAI.APIKey); err != nil {
-			return errors.Wrap(err, errors.ErrCodeInvalidConfig, "invalid OpenAI API key")
-		}
-	}
-
-	// Validate Qianfan
-	if cfg.Providers.Qianfan.APIKey != "" {
-		hasProvider = true
-		if err := v.validateAPIKey(cfg.Providers.Qianfan.APIKey); err != nil {
-			return errors.Wrap(err, errors.ErrCodeInvalidConfig, "invalid Qianfan API key")
-		}
-	}
-
-	// Validate Anthropic
-	if cfg.Providers.Anthropic.APIKey != "" {
-		hasProvider = true
-		if err := v.validateAPIKey(cfg.Providers.Anthropic.APIKey); err != nil {
-			return errors.Wrap(err, errors.ErrCodeInvalidConfig, "invalid Anthropic API key")
-		}
-	}
-
-	// Validate profiles
-	for i, profile := range cfg.Providers.Profiles {
-		if profile.Name == "" {
-			return errors.InvalidConfig(fmt.Sprintf("provider profile %d has empty name", i))
+	// Validate each provider in models.providers
+	for providerName, provider := range cfg.Models.Providers {
+		if provider.BaseURL == "" {
+			return errors.InvalidConfig(fmt.Sprintf("provider '%s' has empty baseUrl", providerName))
 		}
 
-		if profile.APIKey == "" {
-			return errors.InvalidConfig(fmt.Sprintf("provider profile '%s' has empty API key", profile.Name))
+		// API key can be an environment variable reference, so empty is allowed
+		if provider.APIKey != "" {
+			if err := v.validateAPIKey(provider.APIKey); err != nil {
+				return errors.Wrap(err, errors.ErrCodeInvalidConfig,
+					fmt.Sprintf("invalid API key for provider '%s'", providerName))
+			}
 		}
 
-		// Check if provider type is valid
-		validProviders := []string{"openai", "qianfan", "anthropic", "openrouter"}
-		if !slices.Contains(validProviders, profile.Provider) {
-			return errors.InvalidConfig(fmt.Sprintf("provider profile '%s' has invalid provider type: %s",
-				profile.Name, profile.Provider))
-		}
-
-		if err := v.validateAPIKey(profile.APIKey); err != nil {
-			return errors.Wrap(err, errors.ErrCodeInvalidConfig,
-				fmt.Sprintf("invalid API key for profile '%s'", profile.Name))
-		}
-	}
-
-	if !hasProvider {
-		return errors.InvalidConfig("at least one LLM provider must be configured")
-	}
-
-	// Validate failover configuration
-	if cfg.Providers.Failover.Enabled {
-		if err := v.validateFailoverConfig(&cfg.Providers.Failover); err != nil {
-			return err
+		// Validate models
+		for i, model := range provider.Models {
+			if model.ID == "" {
+				return errors.InvalidConfig(fmt.Sprintf("provider '%s' model at index %d has empty id", providerName, i))
+			}
+			if model.Name == "" {
+				return errors.InvalidConfig(fmt.Sprintf("provider '%s' model '%s' has empty name", providerName, model.ID))
+			}
 		}
 	}
 
@@ -256,40 +217,6 @@ func (v *Validator) validateAPIKey(key string) error {
 
 	if strings.Contains(key, " ") {
 		return errors.InvalidInput("API key cannot contain spaces")
-	}
-
-	return nil
-}
-
-// validateFailoverConfig validates failover configuration
-func (v *Validator) validateFailoverConfig(failover *FailoverConfig) error {
-	// Check strategy
-	validStrategies := []string{"round_robin", "least_used", "random"}
-	if !slices.Contains(validStrategies, failover.Strategy) {
-		return errors.InvalidConfig(fmt.Sprintf("invalid failover strategy: %s", failover.Strategy))
-	}
-
-	// Check cooldown
-	if failover.DefaultCooldown < 0 || failover.DefaultCooldown > time.Hour {
-		return errors.InvalidConfig("failover cooldown must be between 0 and 1 hour")
-	}
-
-	// Check circuit breaker configuration
-	if err := v.validateCircuitBreakerConfig(&failover.CircuitBreaker); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// validateCircuitBreakerConfig validates circuit breaker configuration
-func (v *Validator) validateCircuitBreakerConfig(cb *CircuitBreakerConfig) error {
-	if cb.FailureThreshold < 1 || cb.FailureThreshold > 100 {
-		return errors.InvalidConfig("circuit breaker failure threshold must be between 1 and 100")
-	}
-
-	if cb.Timeout < 0 || cb.Timeout > time.Minute*30 {
-		return errors.InvalidConfig("circuit breaker timeout must be between 0 and 30 minutes")
 	}
 
 	return nil

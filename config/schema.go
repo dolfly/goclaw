@@ -10,7 +10,6 @@ type Config struct {
 	Workspace WorkspaceConfig `mapstructure:"workspace" json:"workspace"`
 	Agents    AgentsConfig    `mapstructure:"agents" json:"agents"`
 	Channels  ChannelsConfig  `mapstructure:"channels" json:"channels"`
-	Providers ProvidersConfig `mapstructure:"providers" json:"providers"`
 	Gateway   GatewayConfig   `mapstructure:"gateway" json:"gateway"`
 	Tools     ToolsConfig     `mapstructure:"tools" json:"tools"`
 	Approvals ApprovalsConfig `mapstructure:"approvals" json:"approvals"`
@@ -19,6 +18,10 @@ type Config struct {
 	Skills map[string]interface{} `mapstructure:"skills" json:"skills"`
 	// Agent 绑定配置
 	Bindings []BindingConfig `mapstructure:"bindings" json:"bindings"`
+	// Auth configuration (OpenClaw-compatible)
+	Auth AuthConfig `mapstructure:"auth" json:"auth"`
+	// Models configuration (OpenClaw-compatible)
+	Models ModelsConfig `mapstructure:"models" json:"models"`
 }
 
 // WorkspaceConfig Workspace 配置
@@ -287,61 +290,6 @@ type WeixinChannelConfig struct {
 	AllowedIDs []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
-}
-
-// ProvidersConfig LLM 提供商配置
-type ProvidersConfig struct {
-	OpenRouter OpenRouterProviderConfig `mapstructure:"openrouter" json:"openrouter"`
-	OpenAI     OpenAIProviderConfig     `mapstructure:"openai" json:"openai"`
-	Qianfan    OpenAIProviderConfig     `mapstructure:"qianfan" json:"qianfan"`
-	Anthropic  AnthropicProviderConfig  `mapstructure:"anthropic" json:"anthropic"`
-	Profiles   []ProviderProfileConfig  `mapstructure:"profiles" json:"profiles"`
-	Failover   FailoverConfig           `mapstructure:"failover" json:"failover"`
-}
-
-// ProviderProfileConfig 提供商配置
-type ProviderProfileConfig struct {
-	Name     string `mapstructure:"name" json:"name"`
-	Provider string `mapstructure:"provider" json:"provider"` // openai, qianfan, anthropic, openrouter
-	APIKey   string `mapstructure:"api_key" json:"api_key"`
-	BaseURL  string `mapstructure:"base_url" json:"base_url"`
-	Priority int    `mapstructure:"priority" json:"priority"`
-}
-
-// FailoverConfig 故障转移配置
-type FailoverConfig struct {
-	Enabled         bool                 `mapstructure:"enabled" json:"enabled"`
-	Strategy        string               `mapstructure:"strategy" json:"strategy"` // round_robin, least_used, random
-	DefaultCooldown time.Duration        `mapstructure:"default_cooldown" json:"default_cooldown"`
-	CircuitBreaker  CircuitBreakerConfig `mapstructure:"circuit_breaker" json:"circuit_breaker"`
-}
-
-// CircuitBreakerConfig 断路器配置
-type CircuitBreakerConfig struct {
-	FailureThreshold int           `mapstructure:"failure_threshold" json:"failure_threshold"`
-	Timeout          time.Duration `mapstructure:"timeout" json:"timeout"`
-}
-
-// OpenRouterProviderConfig OpenRouter 配置
-type OpenRouterProviderConfig struct {
-	APIKey     string `mapstructure:"api_key" json:"api_key"`
-	BaseURL    string `mapstructure:"base_url" json:"base_url"`
-	Timeout    int    `mapstructure:"timeout" json:"timeout"`
-	MaxRetries int    `mapstructure:"max_retries" json:"max_retries"`
-}
-
-// OpenAIProviderConfig OpenAI 配置
-type OpenAIProviderConfig struct {
-	APIKey  string `mapstructure:"api_key" json:"api_key"`
-	BaseURL string `mapstructure:"base_url" json:"base_url"`
-	Timeout int    `mapstructure:"timeout" json:"timeout"`
-}
-
-// AnthropicProviderConfig Anthropic 配置
-type AnthropicProviderConfig struct {
-	APIKey  string `mapstructure:"api_key" json:"api_key"`
-	BaseURL string `mapstructure:"base_url" json:"base_url"`
-	Timeout int    `mapstructure:"timeout" json:"timeout"`
 }
 
 // GatewayConfig 网关配置

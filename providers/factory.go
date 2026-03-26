@@ -2,176 +2,47 @@ package providers
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/smallnest/goclaw/config"
-	"github.com/smallnest/goclaw/errors"
 )
 
-// ProviderType 提供商类型
-type ProviderType string
-
-const (
-	ProviderTypeOpenAI     ProviderType = "openai"
-	ProviderTypeQianfan    ProviderType = "qianfan"
-	ProviderTypeAnthropic  ProviderType = "anthropic"
-	ProviderTypeOpenRouter ProviderType = "openrouter"
-)
-
-// NewProvider 创建提供商（支持故障转移和配置轮换）
+// NewProvider 创建提供商
 func NewProvider(cfg *config.Config) (Provider, error) {
-	// 如果启用了故障转移且配置了多个配置，使用轮换提供商
-	if cfg.Providers.Failover.Enabled && len(cfg.Providers.Profiles) > 0 {
-		return NewRotationProviderFromConfig(cfg)
-	}
-
-	// 否则使用单一提供商
 	return NewSimpleProvider(cfg)
 }
 
 // NewSimpleProvider 创建单一提供商
 func NewSimpleProvider(cfg *config.Config) (Provider, error) {
-	// 确定使用哪个提供商
-	providerType, model, err := determineProvider(cfg)
+	// 只支持 OpenClaw 风格的配置
+	if !cfg.Models.HasProviders() {
+		return nil, fmt.Errorf("no LLM provider configured. Please configure models.providers in your config file")
+	}
+	return NewProviderFromModelsConfig(cfg)
+}
+
+// NewProviderFromModelsConfig 从 OpenClaw 风格的 models.providers 配置创建提供商
+func NewProviderFromModelsConfig(cfg *config.Config) (Provider, error) {
+	resolver := NewProviderResolver(cfg)
+	resolved, err := resolver.Resolve(cfg.Agents.Defaults.Model)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to resolve provider: %w", err)
 	}
 
-	switch providerType {
-	case ProviderTypeOpenAI:
-		timeout := time.Duration(cfg.Providers.OpenAI.Timeout) * time.Second
-		return NewOpenAIProviderWithTimeout(cfg.Providers.OpenAI.APIKey, cfg.Providers.OpenAI.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
-	case ProviderTypeQianfan:
-		timeout := time.Duration(cfg.Providers.Qianfan.Timeout) * time.Second
-		return NewOpenAIProviderWithTimeout(cfg.Providers.Qianfan.APIKey, cfg.Providers.Qianfan.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
-	case ProviderTypeAnthropic:
-		timeout := time.Duration(cfg.Providers.Anthropic.Timeout) * time.Second
-		return NewAnthropicProviderWithTimeout(cfg.Providers.Anthropic.APIKey, cfg.Providers.Anthropic.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
-	case ProviderTypeOpenRouter:
-		timeout := time.Duration(cfg.Providers.OpenRouter.Timeout) * time.Second
-		return NewOpenRouterProviderWithTimeout(cfg.Providers.OpenRouter.APIKey, cfg.Providers.OpenRouter.BaseURL, model, cfg.Agents.Defaults.MaxTokens, timeout)
+	// 默认超时 120 秒
+	timeout := 120 * time.Second
+	maxTokens := resolved.GetMaxTokens(cfg.Agents.Defaults.MaxTokens)
+
+	// 根据 API 类型创建提供商
+	switch resolved.API {
+	case config.ModelAPIAnthropicMessages:
+		return NewAnthropicProviderWithTimeout(resolved.APIKey, resolved.BaseURL, resolved.ModelID, maxTokens, timeout)
+	case config.ModelAPIOpenAICompletions:
+		return NewOpenAIProviderWithTimeout(resolved.APIKey, resolved.BaseURL, resolved.ModelID, maxTokens, timeout)
+	case config.ModelAPIOllama:
+		return NewOpenAIProviderWithTimeout(resolved.APIKey, resolved.BaseURL, resolved.ModelID, maxTokens, timeout)
 	default:
-		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
-	}
-}
-
-// NewRotationProviderFromConfig 从配置创建轮换提供商
-func NewRotationProviderFromConfig(cfg *config.Config) (Provider, error) {
-	// 创建错误分类器
-	errorClassifier := errors.NewSimpleErrorClassifier()
-
-	// 确定轮换策略
-	strategy := RotationStrategy(cfg.Providers.Failover.Strategy)
-	if strategy == "" {
-		strategy = RotationStrategyRoundRobin
-	}
-
-	// 创建轮换提供商
-	rotation := NewRotationProvider(
-		strategy,
-		cfg.Providers.Failover.DefaultCooldown,
-		errorClassifier,
-	)
-
-	// 添加所有配置
-	for _, profileCfg := range cfg.Providers.Profiles {
-		prov, err := createProviderByType(profileCfg.Provider, profileCfg.APIKey, profileCfg.BaseURL, cfg.Agents.Defaults.Model, cfg.Agents.Defaults.MaxTokens)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create provider for profile %s: %w", profileCfg.Name, err)
-		}
-
-		priority := profileCfg.Priority
-		if priority == 0 {
-			priority = 1
-		}
-
-		rotation.AddProfile(profileCfg.Name, prov, profileCfg.APIKey, priority)
-	}
-
-	// 如果只有一个配置，返回第一个提供商
-	if len(cfg.Providers.Profiles) == 1 {
-		p := cfg.Providers.Profiles[0]
-		prov, err := createProviderByType(p.Provider, p.APIKey, p.BaseURL, cfg.Agents.Defaults.Model, cfg.Agents.Defaults.MaxTokens)
-		if err != nil {
-			return nil, err
-		}
-		return prov, nil
-	}
-
-	return rotation, nil
-}
-
-// createProviderByType 根据类型创建提供商
-func createProviderByType(providerType, apiKey, baseURL, model string, maxTokens int) (Provider, error) {
-	model = normalizeModelForProvider(ProviderType(providerType), model)
-
-	switch ProviderType(providerType) {
-	case ProviderTypeOpenAI:
-		return NewOpenAIProvider(apiKey, baseURL, model, maxTokens)
-	case ProviderTypeQianfan:
-		return NewOpenAIProvider(apiKey, baseURL, model, maxTokens)
-	case ProviderTypeAnthropic:
-		return NewAnthropicProvider(apiKey, baseURL, model, maxTokens)
-	case ProviderTypeOpenRouter:
-		return NewOpenRouterProvider(apiKey, baseURL, model, maxTokens)
-	default:
-		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
-	}
-}
-
-// determineProvider 确定提供商
-func determineProvider(cfg *config.Config) (ProviderType, string, error) {
-	model := cfg.Agents.Defaults.Model
-
-	// 检查模型名称前缀
-	if strings.HasPrefix(model, "openrouter:") {
-		return ProviderTypeOpenRouter, normalizeModelForProvider(ProviderTypeOpenRouter, model), nil
-	}
-
-	if strings.HasPrefix(model, "qianfan:") {
-		return ProviderTypeQianfan, normalizeModelForProvider(ProviderTypeQianfan, model), nil
-	}
-
-	if strings.HasPrefix(model, "anthropic:") || strings.HasPrefix(model, "claude-") {
-		return ProviderTypeAnthropic, normalizeModelForProvider(ProviderTypeAnthropic, model), nil
-	}
-
-	if strings.HasPrefix(model, "openai:") || strings.HasPrefix(model, "gpt-") {
-		return ProviderTypeOpenAI, normalizeModelForProvider(ProviderTypeOpenAI, model), nil
-	}
-
-	// 根据可用的 API key 决定
-	if cfg.Providers.OpenRouter.APIKey != "" {
-		return ProviderTypeOpenRouter, model, nil
-	}
-
-	if cfg.Providers.Anthropic.APIKey != "" {
-		return ProviderTypeAnthropic, model, nil
-	}
-
-	if cfg.Providers.Qianfan.APIKey != "" {
-		return ProviderTypeQianfan, model, nil
-	}
-
-	if cfg.Providers.OpenAI.APIKey != "" {
-		return ProviderTypeOpenAI, model, nil
-	}
-
-	return "", "", fmt.Errorf("no LLM provider API key configured")
-}
-
-func normalizeModelForProvider(providerType ProviderType, model string) string {
-	switch providerType {
-	case ProviderTypeOpenRouter:
-		return strings.TrimPrefix(model, "openrouter:")
-	case ProviderTypeAnthropic:
-		return strings.TrimPrefix(model, "anthropic:")
-	case ProviderTypeQianfan:
-		return strings.TrimPrefix(model, "qianfan:")
-	case ProviderTypeOpenAI:
-		return strings.TrimPrefix(model, "openai:")
-	default:
-		return model
+		// 默认使用 OpenAI 兼容的 API
+		return NewOpenAIProviderWithTimeout(resolved.APIKey, resolved.BaseURL, resolved.ModelID, maxTokens, timeout)
 	}
 }

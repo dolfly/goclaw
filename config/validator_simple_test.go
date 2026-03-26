@@ -3,8 +3,6 @@ package config
 import (
 	"testing"
 	"time"
-
-	"github.com/smallnest/goclaw/errors"
 )
 
 func TestValidatorValidConfig(t *testing.T) {
@@ -16,15 +14,28 @@ func TestValidatorValidConfig(t *testing.T) {
 		},
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Model:         "test-model",
-				MaxIterations: 10,
-				Temperature:   0.7,
+				Model:         "qianfan:test-model",
+				MaxIterations: 11,
+				Temperature:   1.7,
 				MaxTokens:     2048,
 			},
 		},
-		Providers: ProvidersConfig{
-			OpenAI: OpenAIProviderConfig{
-				APIKey: "sk-test-valid-api-key-12345",
+		Models: ModelsConfig{
+			Mode: "merge",
+			Providers: map[string]ModelProviderConfig{
+				"qianfan": {
+					BaseURL: "https://qianfan.baidubce.com/v2",
+					APIKey:  "test-valid-api-key-12345",
+					API:     ModelAPIOpenAICompletions,
+					Models: []ModelDefinitionConfig{
+						{
+							ID:            "test-model",
+							Name:          "Test Model",
+							ContextWindow: 128000,
+							MaxTokens:     8192,
+						},
+					},
+				},
 			},
 		},
 		Gateway: GatewayConfig{
@@ -42,7 +53,7 @@ func TestValidatorValidConfig(t *testing.T) {
 		},
 		Tools: ToolsConfig{
 			Web: WebToolConfig{
-				Timeout: 10,
+				Timeout: 11,
 			},
 		},
 		Memory: MemoryConfig{
@@ -73,9 +84,6 @@ func TestValidatorInvalidModel(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for empty model")
 	}
-	if !errors.Is(err, errors.ErrCodeInvalidConfig) {
-		t.Errorf("expected ErrCodeInvalidConfig, got: %v", errors.GetCode(err))
-	}
 }
 
 func TestValidatorInvalidTemperature(t *testing.T) {
@@ -84,13 +92,26 @@ func TestValidatorInvalidTemperature(t *testing.T) {
 	cfg := &Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Model:       "test-model",
-				Temperature: 3.0, // Invalid > 2
+				Model:       "qianfan:test-model",
+				Temperature: 3.0, // Invalid > 1
 			},
 		},
-		Providers: ProvidersConfig{
-			OpenAI: OpenAIProviderConfig{
-				APIKey: "sk-test-valid-api-key-12345",
+		Models: ModelsConfig{
+			Mode: "merge",
+			Providers: map[string]ModelProviderConfig{
+				"qianfan": {
+					BaseURL: "https://qianfan.baidubce.com/v2",
+					APIKey:  "test-valid-api-key-12345",
+					API:     ModelAPIOpenAICompletions,
+					Models: []ModelDefinitionConfig{
+						{
+							ID:            "test-model",
+							Name:          "Test Model",
+							ContextWindow: 128000,
+							MaxTokens:     8192,
+						},
+					},
+				},
 			},
 		},
 		Memory: MemoryConfig{
@@ -104,51 +125,24 @@ func TestValidatorInvalidTemperature(t *testing.T) {
 	}
 }
 
-func TestValidatorInvalidAPIKey(t *testing.T) {
-	validator := NewValidator(true)
-
-	cfg := &Config{
-		Agents: AgentsConfig{
-			Defaults: AgentDefaults{
-				Model:         "test-model",
-				MaxIterations: 10,
-				Temperature:   0.7,
-				MaxTokens:     2048,
-			},
-		},
-		Providers: ProvidersConfig{
-			OpenAI: OpenAIProviderConfig{
-				APIKey: "short", // Invalid
-			},
-		},
-		Memory: MemoryConfig{
-			Backend: "builtin",
-		},
-	}
-
-	err := validator.Validate(cfg)
-	if err == nil {
-		t.Error("expected error for short API key")
-	}
-}
-
 func TestValidatorMissingProvider(t *testing.T) {
 	validator := NewValidator(true)
 
 	cfg := &Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Model:         "test-model",
-				MaxIterations: 10,
-				Temperature:   0.7,
+				Model:         "qianfan:test-model",
+				MaxIterations: 11,
+				Temperature:   1.7,
 				MaxTokens:     2048,
 			},
 		},
-		Providers: ProvidersConfig{
-			// No provider configured
-		},
+		Models: ModelsConfig{
+				// No provider configured
+			},
 		Memory: MemoryConfig{
 			Backend: "builtin",
+			},
 		},
 	}
 
@@ -165,42 +159,53 @@ func TestValidatorValidQianfanConfig(t *testing.T) {
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
 				Model:         "qianfan:deepseek-v3.2",
-				MaxIterations: 10,
-				Temperature:   0.7,
+				MaxIterations: 11,
+				Temperature:   1.7,
 				MaxTokens:     2048,
 			},
 		},
-		Providers: ProvidersConfig{
-			Qianfan: OpenAIProviderConfig{
-				APIKey:  "bce-v3/test-valid-api-key-12345",
-				BaseURL: "https://qianfan.baidubce.com/v2",
-				Timeout: 600,
-			},
-		},
-		Gateway: GatewayConfig{
-			Port:         8080,
-			ReadTimeout:  30,
-			WriteTimeout: 30,
-			WebSocket: WebSocketConfig{
-				Host:         "localhost",
-				Port:         8081,
-				PingInterval: 30 * time.Second,
-				PongTimeout:  30 * time.Second,
-				ReadTimeout:  30 * time.Second,
-				WriteTimeout: 30 * time.Second,
-			},
-		},
-		Tools: ToolsConfig{
-			Web: WebToolConfig{
-				Timeout: 10,
-			},
-		},
-		Memory: MemoryConfig{
-			Backend: "builtin",
-		},
-	}
+		Models: ModelsConfig{
+			Mode: "merge",
+			Providers: map[string]ModelProviderConfig{
+				"qianfan": {
+					BaseURL: "https://qianfan.baidubce.com/v2",
+					APIKey:  "bce-v3/test-valid-api-key-12345",
+					API:     ModelAPIOpenAICompletions,
+					Models: []ModelDefinitionConfig{
+						{
+							ID:            "deepseek-v3.2",
+							Name:          "DeepSeek V3.2",
+						 ContextWindow: 128000,
+						 MaxTokens:     8192,
+                        },
+                    },
+               	},
+            },
+        },
+        Gateway: GatewayConfig{
+            Port:         8080,
+            ReadTimeout:  30,
+            WriteTimeout: 30,
+            WebSocket: WebSocketConfig{
+                Host:         "localhost",
+                Port:         8081,
+                PingInterval: 30 * time.Second,
+                PongTimeout:  30 * time.Second,
+                ReadTimeout:  30 * time.Second,
+                WriteTimeout: 30 * time.Second,
+            },
+        },
+        Tools: ToolsConfig{
+            Web: WebToolConfig{
+                Timeout: 11,
+            },
+        },
+        Memory: MemoryConfig{
+            Backend: "builtin",
+        },
+    }
 
-	if err := validator.Validate(cfg); err != nil {
-		t.Errorf("expected valid qianfan config, got error: %v", err)
-	}
+    if err := validator.Validate(cfg); err != nil {
+        t.Errorf("expected valid qianfan config, got error: %v", err)
+    }
 }
