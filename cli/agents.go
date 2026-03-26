@@ -197,7 +197,7 @@ func runAgentsAdd(cmd *cobra.Command, args []string) {
 
 	model := agentsAddModel
 	if model == "" {
-		model = cfg.Agents.Defaults.Model
+		model = cfg.Agents.Defaults.Model.Effective()
 		if model == "" {
 			model = "gpt-4"
 		}

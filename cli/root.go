@@ -125,7 +125,7 @@ func runConfigShow(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Println("Current Configuration:")
-	fmt.Printf("  Model: %s\n", cfg.Agents.Defaults.Model)
+	fmt.Printf("  Model: %s\n", cfg.Agents.Defaults.Model.Effective())
 	fmt.Printf("  Max Iterations: %d\n", cfg.Agents.Defaults.MaxIterations)
 	fmt.Printf("  Temperature: %.1f\n", cfg.Agents.Defaults.Temperature)
 }

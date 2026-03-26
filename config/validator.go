@@ -110,7 +110,7 @@ func (v *Validator) validateAgents(cfg *Config) error {
 // validateAgentDefaults validates default agent configuration
 func (v *Validator) validateAgentDefaults(defaults *AgentDefaults) error {
 	// Check model
-	if strings.TrimSpace(defaults.Model) == "" {
+	if strings.TrimSpace(defaults.Model.Effective()) == "" {
 		return errors.InvalidConfig("default agent model cannot be empty")
 	}
 

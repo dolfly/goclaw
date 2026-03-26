@@ -24,7 +24,7 @@ func NewSimpleProvider(cfg *config.Config) (Provider, error) {
 // NewProviderFromModelsConfig 从 OpenClaw 风格的 models.providers 配置创建提供商
 func NewProviderFromModelsConfig(cfg *config.Config) (Provider, error) {
 	resolver := NewProviderResolver(cfg)
-	resolved, err := resolver.Resolve(cfg.Agents.Defaults.Model)
+	resolved, err := resolver.Resolve(cfg.Agents.Defaults.Model.Effective())
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve provider: %w", err)
 	}

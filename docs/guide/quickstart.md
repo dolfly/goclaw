@@ -67,7 +67,9 @@ GoClaw 按以下顺序查找配置文件：
 {
   "agents": {
     "defaults": {
-      "model": "qianfan:deepseek-v3.2",
+      "model": {
+        "primary": "qianfan/deepseek-v3.2"
+      },
       "max_iterations": 15,
       "temperature": 0.7,
       "max_tokens": 4096
@@ -328,7 +330,9 @@ A: 修改配置文件中的 `model` 和 `providers` 部分：
 {
   "agents": {
     "defaults": {
-      "model": "qianfan:deepseek-v3.2"
+      "model": {
+        "primary": "qianfan/deepseek-v3.2"
+      }
     }
   },
   "providers": {

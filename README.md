@@ -205,7 +205,9 @@ goclaw 按以下顺序查找配置文件（找到第一个即使用）：
   },
   "agents": {
     "defaults": {
-      "model": "qianfan:kimi-k2.5",
+      "model": {
+        "primary": "qianfan/kimi-k2.5"
+      },
       "max_iterations": 15,
       "temperature": 0.7,
       "max_tokens": 4096
@@ -569,13 +571,15 @@ goclaw 支持以下环境变量（前缀 `GOSKILLS_`）：
 
 ### Q: 如何切换不同的 LLM 提供商？
 
-A: 在 `models.providers` 中配置提供商，然后在 `agents.defaults.model` 中指定使用哪个模型（格式：`provider:model-id`）：
+A: 在 `models.providers` 中配置提供商，然后在 `agents.defaults.model.primary` 中指定使用哪个模型（格式：`provider/model`，冒号也继续受支持）：
 
 ```json
 {
   "agents": {
     "defaults": {
-      "model": "qianfan:kimi-k2.5"
+      "model": {
+        "primary": "qianfan/kimi-k2.5"
+      }
     }
   },
   "models": {
@@ -604,10 +608,10 @@ A: 在 `models.providers` 中配置提供商，然后在 `agents.defaults.model`
 ```
 
 支持的模型格式：
-- `qianfan:kimi-k2.5` - Qianfan（百度千帆）
-- `openai:gpt-4o` - OpenAI
-- `anthropic:claude-sonnet-4-20250514` - Anthropic
-- `openrouter:anthropic/claude-sonnet-4` - OpenRouter
+- `qianfan/kimi-k2.5` - Qianfan（百度千帆）
+- `openai/gpt-4o` - OpenAI
+- `anthropic/claude-sonnet-4-20250514` - Anthropic
+- `openrouter/anthropic/claude-sonnet-4` - OpenRouter
 
 ### Q: 工具调用失败怎么办？
 
@@ -673,10 +677,10 @@ A: 在 `models.providers` 中配置多个提供商，Agent 会自动使用配置
 }
 ```
 
-然后通过修改 `agents.defaults.model` 切换不同的提供商，例如：
-- `"model": "qianfan:kimi-k2.5"` - 使用千帆
-- `"model": "openai:gpt-4o"` - 使用 OpenAI
-- `"model": "anthropic:claude-sonnet-4-20250514"` - 使用 Anthropic
+然后通过修改 `agents.defaults.model.primary` 切换不同的提供商，例如：
+- `qianfan/kimi-k2.5` - 使用千帆
+- `openai/gpt-4o` - 使用 OpenAI
+- `anthropic/claude-sonnet-4-20250514` - 使用 Anthropic
 
 ### Q: Browser 工具需要什么依赖？
 

@@ -1001,7 +1001,9 @@ go build -o goclaw .
 {
   "agents": {
     "defaults": {
-      "model": "qianfan:deepseek-v3.2",
+      "model": {
+        "primary": "qianfan/deepseek-v3.2"
+      },
       "max_iterations": 15,
       "temperature": 0.7
     }

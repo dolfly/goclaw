@@ -150,7 +150,7 @@ func (m *AgentManager) SetupFromConfig(cfg *config.Config, contextBuilder *Conte
 			ID:        "default",
 			Name:      "Default Agent",
 			Default:   true,
-			Model:     cfg.Agents.Defaults.Model,
+			Model:     cfg.Agents.Defaults.Model.Effective(),
 			Workspace: cfg.Workspace.Path,
 		}
 		if err := m.createAgent(defaultAgentCfg, contextBuilder, cfg); err != nil {
@@ -355,7 +355,7 @@ func (m *AgentManager) createAgent(cfg config.AgentConfig, contextBuilder *Conte
 	// 获取模型
 	model := cfg.Model
 	if model == "" {
-		model = globalCfg.Agents.Defaults.Model
+		model = globalCfg.Agents.Defaults.Model.Effective()
 	}
 
 	// 获取最大迭代次数

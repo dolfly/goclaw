@@ -37,7 +37,7 @@ type AgentsConfig struct {
 
 // AgentDefaults Agent 默认配置
 type AgentDefaults struct {
-	Model              string           `mapstructure:"model" json:"model"`
+	Model              ModelSelection   `mapstructure:"model" json:"model"`
 	MaxIterations      int              `mapstructure:"max_iterations" json:"max_iterations"`
 	Temperature        float64          `mapstructure:"temperature" json:"temperature"`
 	MaxTokens          int              `mapstructure:"max_tokens" json:"max_tokens"`
@@ -275,8 +275,8 @@ type GotifyChannelConfig struct {
 // SlackChannelConfig Slack 通道配置
 type SlackChannelConfig struct {
 	Enabled       bool     `mapstructure:"enabled" json:"enabled"`
-	Token         string   `mapstructure:"token" json:"token"`                       // Bot Token (xoxb-...)
-	SigningSecret string   `mapstructure:"signing_secret" json:"signing_secret"`     // Signing Secret for verification
+	Token         string   `mapstructure:"token" json:"token"`                   // Bot Token (xoxb-...)
+	SigningSecret string   `mapstructure:"signing_secret" json:"signing_secret"` // Signing Secret for verification
 	AllowedIDs    []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置（新格式）
 	Accounts map[string]ChannelAccountConfig `mapstructure:"accounts" json:"accounts"`
@@ -285,7 +285,7 @@ type SlackChannelConfig struct {
 // WeixinChannelConfig 微信通道配置
 type WeixinChannelConfig struct {
 	Enabled    bool     `mapstructure:"enabled" json:"enabled"`
-	BaseURL    string   `mapstructure:"base_url" json:"base_url"`       // API base URL (默认: https://ilinkai.weixin.qq.com)
+	BaseURL    string   `mapstructure:"base_url" json:"base_url"`         // API base URL (默认: https://ilinkai.weixin.qq.com)
 	CDNBaseURL string   `mapstructure:"cdn_base_url" json:"cdn_base_url"` // CDN base URL (默认: https://novac2c.cdn.weixin.qq.com/c2c)
 	AllowedIDs []string `mapstructure:"allowed_ids" json:"allowed_ids"`
 	// 多账号配置

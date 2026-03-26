@@ -157,7 +157,7 @@ func nonInteractiveSetup(cfg *config.Config) error {
 	}
 
 	// Set default model
-	cfg.Agents.Defaults.Model = fmt.Sprintf("%s:%s", provider, modelID)
+	cfg.Agents.Defaults.Model.Primary = fmt.Sprintf("%s/%s", provider, modelID)
 
 	fmt.Printf("  ✓ Provider configured: %s\n", provider)
 	return nil
@@ -174,7 +174,14 @@ func interactiveSetup(cfg *config.Config) error {
 		fmt.Println("  Provider already configured. Press Enter to keep or enter new value:")
 	} else {
 		fmt.Println("  Let's configure your LLM provider.")
-		fmt.Println("  Supported providers: qianfan, openai, anthropic, openrouter, ollama, etc.")
+		fmt.Println("  Supported providers:")
+		fmt.Println("    - qianfan (百度千帆)")
+		fmt.Println("    - openai")
+		fmt.Println("    - anthropic")
+		fmt.Println("    - openrouter")
+		fmt.Println("    - ollama (本地)")
+		fmt.Println("    - google / google-vertex (Gemini)")
+		fmt.Println("    - Or any OpenAI-compatible provider (e.g., deepseek, moonshot, grok, chutes)")
 	}
 
 	// Prompt for provider
@@ -207,12 +214,17 @@ func interactiveSetup(cfg *config.Config) error {
 	baseURL := promptString("Base URL (press Enter for default)", defaultBaseURL, false)
 
 	// Prompt for model
-	defaultModel := cfg.Agents.Defaults.Model
-	if defaultModel == "" || !strings.HasPrefix(defaultModel, provider+":") {
+	defaultModel := cfg.Agents.Defaults.Model.Effective()
+	hasProviderPrefix := strings.HasPrefix(defaultModel, provider+":") || strings.HasPrefix(defaultModel, provider+"/")
+	if defaultModel == "" || !hasProviderPrefix {
 		defaultModel = getDefaultModel(provider)
 	} else {
 		// Strip provider prefix for display
-		defaultModel = strings.TrimPrefix(defaultModel, provider+":")
+		if strings.HasPrefix(defaultModel, provider+":") {
+			defaultModel = strings.TrimPrefix(defaultModel, provider+":")
+		} else {
+			defaultModel = strings.TrimPrefix(defaultModel, provider+"/")
+		}
 	}
 	modelID := promptString("Model ID", defaultModel, false)
 
@@ -245,7 +257,7 @@ func interactiveSetup(cfg *config.Config) error {
 	}
 
 	// Set default model with provider prefix
-	cfg.Agents.Defaults.Model = fmt.Sprintf("%s:%s", provider, modelID)
+	cfg.Agents.Defaults.Model.Primary = fmt.Sprintf("%s/%s", provider, modelID)
 
 	fmt.Println("  ✓ Configuration saved")
 	return nil
@@ -350,7 +362,7 @@ func printSummary(cfg *config.Config) {
 		fmt.Printf("  API Key:   %s\n", providerAPIKey)
 	}
 
-	fmt.Printf("  Model:     %s\n", cfg.Agents.Defaults.Model)
+	fmt.Printf("  Model:     %s\n", cfg.Agents.Defaults.Model.Effective())
 
 	// Workspace path
 	workspacePath, _ := config.GetWorkspacePath(cfg)

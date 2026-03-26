@@ -15,7 +15,9 @@ func TestProviderResolver_ResolveFromModelsConfig(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
-				Model:     "openai:gpt-4o",
+				Model: config.ModelSelection{
+					Primary: "openai:gpt-4o",
+				},
 				MaxTokens: 4096,
 			},
 		},
@@ -83,7 +85,9 @@ func TestProviderResolver_ResolveWithEnvVarRef(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
-				Model:     "gpt-4o",
+				Model: config.ModelSelection{
+					Primary: "gpt-4o",
+				},
 				MaxTokens: 4096,
 			},
 		},
@@ -116,7 +120,9 @@ func TestProviderResolver_AnthropicProvider(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
-				Model:     "claude-3-opus",
+				Model: config.ModelSelection{
+					Primary: "claude-3-opus",
+				},
 				MaxTokens: 4096,
 			},
 		},
@@ -176,7 +182,9 @@ func TestProviderResolver_CustomProvider(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
-				Model:     "custom:model-v1",
+				Model: config.ModelSelection{
+					Primary: "custom:model-v1",
+				},
 				MaxTokens: 4096,
 			},
 		},
@@ -218,11 +226,57 @@ func TestProviderResolver_CustomProvider(t *testing.T) {
 	}
 }
 
+func TestProviderResolver_SlashModelRef(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Model: config.ModelSelection{
+					Primary: "openai/gpt-4o",
+				},
+				MaxTokens: 4096,
+			},
+		},
+		Models: config.ModelsConfig{
+			Mode: "merge",
+			Providers: map[string]config.ModelProviderConfig{
+				"openai": {
+					BaseURL: "https://api.openai.com/v1",
+					APIKey:  "openai-key",
+					API:     config.ModelAPIOpenAICompletions,
+					Models: []config.ModelDefinitionConfig{
+						{ID: "gpt-4o", Name: "GPT-4o"},
+					},
+				},
+			},
+		},
+	}
+
+	resolver := NewProviderResolver(cfg)
+	resolved, err := resolver.Resolve("openai/gpt-4o")
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+
+	if resolved.ProviderName != "openai" {
+		t.Errorf("Expected provider 'openai', got '%s'", resolved.ProviderName)
+	}
+
+	if resolved.ModelID != "gpt-4o" {
+		t.Errorf("Expected model 'gpt-4o', got '%s'", resolved.ModelID)
+	}
+
+	if resolved.APIKey != "openai-key" {
+		t.Errorf("Expected API key 'openai-key', got '%s'", resolved.APIKey)
+	}
+}
+
 func TestProviderResolver_MissingProvider(t *testing.T) {
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
-				Model:     "openai:gpt-4",
+				Model: config.ModelSelection{
+					Primary: "openai:gpt-4",
+				},
 				MaxTokens: 4096,
 			},
 		},

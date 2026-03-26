@@ -79,9 +79,11 @@ func (r *ProviderResolver) Resolve(model string) (*ResolvedProvider, error) {
 
 // parseProviderModel parses "provider:model-id" format
 func parseProviderModel(model string) (provider, modelID string) {
-	parts := strings.SplitN(model, ":", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
+	if idx := strings.Index(model, ":"); idx >= 0 {
+		return model[:idx], model[idx+1:]
+	}
+	if idx := strings.Index(model, "/"); idx >= 0 {
+		return model[:idx], model[idx+1:]
 	}
 	return "", model
 }

@@ -10,7 +10,9 @@ This guide covers configuring goclaw, including new features like multi-provider
 {
   "agents": {
     "defaults": {
-      "model": "qianfan:deepseek-v3.2",
+      "model": {
+        "primary": "qianfan/deepseek-v3.2"
+      },
       "max_iterations": 15,
       "temperature": 0.7
     }
@@ -456,7 +458,9 @@ goclaw config show
 {
   "agents": {
     "defaults": {
-      "model": "openrouter:openai/gpt-3.5-turbo",
+      "model": {
+        "primary": "openrouter/openai/gpt-3.5-turbo"
+      },
       "max_tokens": 2048
     }
   },
