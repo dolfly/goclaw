@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/smallnest/goclaw/bus"
@@ -226,20 +228,36 @@ func (h *Handler) registerAgentMethods() {
 			return nil, fmt.Errorf("failed to list sessions: %w", err)
 		}
 
-		result := make([]map[string]interface{}, 0, len(sessions))
+		var updateTimes []int64
+		var sessionMap = map[int64][]*session.Session{}
 		for _, key := range sessions {
 			sess, err := h.sessionMgr.GetOrCreate(key)
 			if err != nil {
 				continue
 			}
-			result = append(result, map[string]interface{}{
-				"key":           sess.Key,
-				"message_count": len(sess.Messages),
-				"created_at":    sess.CreatedAt,
-				"updated_at":    sess.UpdatedAt,
-			})
+			upt := sess.UpdatedAt.Unix()
+			if v, ok := sessionMap[upt]; ok {
+				sessionMap[upt] = append(v, sess)
+			} else {
+				updateTimes = append(updateTimes, upt)
+				sessionMap[upt] = []*session.Session{sess}
+			}
 		}
-
+		slices.SortFunc(updateTimes, func(e int64, e2 int64) int {
+			return cmp.Compare(e2, e)
+		})
+		result := make([]map[string]interface{}, 0, len(sessions))
+		for _, updateTime := range updateTimes {
+			ss := sessionMap[updateTime]
+			for _, sess := range ss {
+				result = append(result, map[string]interface{}{
+					"key":           sess.Key,
+					"message_count": len(sess.Messages),
+					"created_at":    sess.CreatedAt,
+					"updated_at":    sess.UpdatedAt,
+				})
+			}
+		}
 		return result, nil
 	})
 

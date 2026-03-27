@@ -44,7 +44,8 @@ type Skill struct {
 	Requires SkillRequirements `yaml:"requires"` // 兼容旧格式
 	Content  string            `yaml:"-"`        // 技能内容（Markdown）
 	// 缺失的依赖信息
-	MissingDeps *MissingDeps `yaml:"-"` // 解析时填充
+	MissingDeps *MissingDeps      `yaml:"-"` // 解析时填充
+	Resources   map[string]string `yaml:"-"` //所含资源地址
 }
 
 // MissingDeps 缺失的依赖信息
@@ -193,6 +194,12 @@ func (l *SkillsLoader) loadSkill(path string) error {
 		skill.Name = filepath.Base(path)
 	}
 
+	if resourcePath, re := filepath.Abs(path); re == nil {
+		if err = l.loadResource(&skill, resourcePath); err != nil {
+			return err
+		}
+	}
+
 	l.skills[skill.Name] = &skill
 
 	// 记录 always 技能
@@ -200,6 +207,32 @@ func (l *SkillsLoader) loadSkill(path string) error {
 		l.alwaysSkills = append(l.alwaysSkills, skill.Name)
 	}
 
+	return nil
+}
+
+// 加载skill目录下的所有资源
+func (l *SkillsLoader) loadResource(skill *Skill, skillDir string) error {
+	if skill.Resources == nil {
+		skill.Resources = make(map[string]string)
+	}
+	entries, err := os.ReadDir(skillDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			fileName := strings.ToLower(entry.Name())
+			if fileName != "skill.md" {
+				skill.Resources[entry.Name()] = filepath.Join(skillDir, entry.Name())
+			}
+			continue
+		}
+		skillPath := filepath.Join(skillDir, entry.Name())
+		if err = l.loadResource(skill, skillPath); err != nil {
+			// 跳过加载异常的资源
+			continue
+		}
+	}
 	return nil
 }
 

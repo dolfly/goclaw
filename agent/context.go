@@ -500,6 +500,14 @@ func (b *ContextBuilder) buildSelectedSkills(selectedSkillNames []string, skills
 					sb.WriteString(fmt.Sprintf("> Description: %s\n\n", skill.Description))
 				}
 
+				if len(skill.Resources) > 0 {
+					sb.WriteString("**⏰ Resources - this skill use resource or scrpit file path list: \n")
+					for k, resource := range skill.Resources {
+						sb.WriteString(fmt.Sprintf("* %s : %s\n", k, resource))
+					}
+					sb.WriteString("\n")
+				}
+
 				// 显示缺失依赖警告和安装命令
 				if skill.MissingDeps != nil {
 					sb.WriteString("**⚠️ MISSING DEPENDENCIES - Install before using:**\n\n")
