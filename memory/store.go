@@ -4,13 +4,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	_ "github.com/glebarez/sqlite"
 	"github.com/google/uuid"
+	"github.com/smallnest/goclaw/internal/logger"
+	"go.uber.org/zap"
 )
 
 // SQLiteStore implements the Store interface using SQLite
@@ -457,8 +461,8 @@ func (s *SQLiteStore) Search(query []float32, opts SearchOptions) ([]*SearchResu
 		}
 
 		// If hybrid search is enabled and FTS is available, combine results
-		if opts.Hybrid && s.isFTSEnabled() {
-			ftsResults, err := s.searchFTS(query, opts)
+		if opts.Hybrid && s.isFTSEnabled() && opts.QueryText != "" {
+			ftsResults, err := s.searchFTS(opts.QueryText, opts)
 			if err == nil && len(ftsResults) > 0 {
 				return s.mergeHybridResults(results, ftsResults, opts), nil
 			}
@@ -467,9 +471,9 @@ func (s *SQLiteStore) Search(query []float32, opts SearchOptions) ([]*SearchResu
 		return results, nil
 	}
 
-	// Fallback to basic text search
-	if s.isFTSEnabled() {
-		return s.searchFTS(query, opts)
+	// Fallback to FTS search if available
+	if s.isFTSEnabled() && opts.QueryText != "" {
+		return s.searchFTS(opts.QueryText, opts)
 	}
 
 	// No search available, return empty
@@ -574,11 +578,88 @@ func (s *SQLiteStore) searchVector(query []float32, opts SearchOptions) ([]*Sear
 	return results, nil
 }
 
-// searchFTS performs full-text search
-func (s *SQLiteStore) searchFTS(query []float32, opts SearchOptions) ([]*SearchResult, error) {
-	// For now, this is a placeholder
-	// In a full implementation, we'd convert the vector to text or use a separate text query
-	return []*SearchResult{}, nil
+// searchFTS performs full-text search using SQLite FTS5
+func (s *SQLiteStore) searchFTS(queryText string, opts SearchOptions) ([]*SearchResult, error) {
+	if !s.isFTSEnabled() || queryText == "" {
+		return []*SearchResult{}, nil
+	}
+
+	// Build query with filters
+	args := []interface{}{queryText}
+	whereClauses := []string{}
+
+	if len(opts.Sources) > 0 {
+		placeholders := make([]string, len(opts.Sources))
+		for i, src := range opts.Sources {
+			placeholders[i] = "?"
+			args = append(args, string(src))
+		}
+		whereClauses = append(whereClauses, "source IN ("+strings.Join(placeholders, ", ")+")")
+	}
+
+	if len(opts.Types) > 0 {
+		placeholders := make([]string, len(opts.Types))
+		for i, t := range opts.Types {
+			placeholders[i] = "?"
+			args = append(args, string(t))
+		}
+		whereClauses = append(whereClauses, "type IN ("+strings.Join(placeholders, ", ")+")")
+	}
+
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Use FTS5 with BM25 ranking
+	query := `
+		SELECT 
+			m.id, m.text, m.source, m.type, m.created_at, m.updated_at,
+			bm25(memory_fts) as score
+		FROM memory_fts
+		JOIN memories m ON memory_fts.id = m.id
+		` + whereClause + `
+		ORDER BY score DESC
+		LIMIT ?
+	`
+	args = append(args, opts.Limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("FTS query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*SearchResult
+	for rows.Next() {
+		var sr SearchResult
+		var score float64
+
+		err := rows.Scan(
+			&sr.ID,
+			&sr.Text,
+			&sr.Source,
+			&sr.Type,
+			&sr.CreatedAt,
+			&sr.UpdatedAt,
+			&score,
+		)
+		if err != nil {
+			logger.Warn("Failed to scan FTS result", zap.Error(err))
+			continue
+		}
+
+		// BM25 returns negative scores for better matches, convert to 0-1 range
+		// Normalize: higher (less negative) BM25 = lower score
+		sr.Score = 1.0 / (1.0 + math.Abs(score))
+		sr.TextScore = sr.Score
+
+		if sr.Score >= opts.MinScore {
+			results = append(results, &sr)
+		}
+	}
+
+	return results, nil
 }
 
 // mergeHybridResults combines vector and FTS results
