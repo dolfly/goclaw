@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1030,14 +1031,23 @@ func appendTypes(args []interface{}, types []MemoryType) []interface{} {
 }
 
 func float32SliceToString(vec []float32) string {
-	str := make([]byte, 0, len(vec)*8)
+	if len(vec) == 0 {
+		return ""
+	}
+
+	// Use strings.Builder for efficient concatenation
+	var builder strings.Builder
+	builder.Grow(len(vec) * 12) // Preallocate: ~12 chars per float
+
 	for i, v := range vec {
 		if i > 0 {
-			str = append(str, ',')
+			builder.WriteByte(',')
 		}
-		str = append(str, fmt.Sprintf("%f", v)...)
+		// Use strconv.FormatFloat for better performance than fmt.Sprintf
+		builder.WriteString(strconv.FormatFloat(float64(v), 'f', 6, 32))
 	}
-	return string(str)
+
+	return builder.String()
 }
 
 func joinString(strs []string, sep string) string {
